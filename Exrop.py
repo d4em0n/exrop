@@ -44,3 +44,9 @@ class Exrop(object):
         ropchain = self.chain_builder.build_chain()
         return ropchain
 
+    def set_writes(self, writes):
+        self.chain_builder.set_writes(writes)
+        self.chain_builder.solve_chain_write()
+        ropchain = self.chain_builder.build_chain()
+        return ropchain
+

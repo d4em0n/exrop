@@ -29,20 +29,31 @@ sample_gadgets7 = {
     0x2000: 'pop rsi; add rsp, 0x18; pop rbx; pop rbp; ret',
     0x3000: 'pop rdi; ret',
 }
-"""
+sample_gadgets8 = {
+    0x1000: "mov qword ptr [rdx+0x10], r10 ; mov eax, 1 ; ret",
+    0x2000: "pop r10; pop rdx; ret"
+}
+
+sample_gadgets9 = {
+    0x1000: "pop rdi; pop rbp; ret",
+    0x2000: "mov ah, 0x3f; mov qword ptr [rdi + 8], rax; ret"
+}
+
+sample_gadgets10 = {
+    0x1000: "mov dword ptr [rdi + 0x28], esi; mov qword ptr [rdi + 0x30], rdx; ret",
+    0x2000: "pop rdx; ret",
+    0x3000: "pop rsi; ret",
+    0x4000: "pop rdi; ret"
+}
+find_write = {0x41414141:0x42424242, 0x43434343: 0x44444444}
+find_write = {0x43434343: 0x44444444}
 
 chain_builder = ChainBuilder()
-chain_builder.load_list_gadget_string(sample_gadgets7)
-chain_builder.set_regs(sample_gadgets1_find)
+chain_builder.load_list_gadget_string(sample_gadgets10)
+chain_builder.set_writes(find_write)
 chain_builder.analyzeAll()
-chain_builder.solve_chain()
+chain_builder.solve_chain_write()
 raw_chain = chain_builder.raw_chain
 build_chain = chain_builder.build_chain()
 build_chain.set_base_addr(0x400000)
 build_chain.dump()
-"""
-
-rop = Exrop("/bin/bash")
-rop.find_gadgets(cache=True)
-chain = rop.set_regs({'rdi':0x41414141, 'rsi': 0x42424242, 'rdx':0x43434343, 'rax':0x44444444})
-chain.dump()

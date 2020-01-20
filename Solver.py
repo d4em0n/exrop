@@ -12,6 +12,17 @@ def initialize():
     ctx.setAstRepresentationMode(AST_REPRESENTATION.PYTHON)
     return ctx
 
+def findCandidatesWriteGadgets(gadgets):
+    candidates = {}
+    for gadget in list(gadgets):
+        if gadget.is_memory_write:
+            isw = gadget.is_memory_write
+            if not isw in candidates:
+                candidates[isw] = [gadget]
+                continue
+            candidates[isw].append(gadget)
+    return candidates
+
 def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set()):
     candidates_pop = []
     candidates_write = []
@@ -23,7 +34,7 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set()):
         for comb in reg_combs:
             reg_comb = set(comb)
             for gadget in list(gadgets):
-                if set.intersection(not_write_regs, gadget.written_regs):
+                if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read:
                     continue
 
                 if reg_comb.issubset(set(gadget.defined_regs.keys())):
@@ -65,11 +76,11 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
         tmp_solved = dict()
         tmp_written_regs = set()
         intersect = False
+        if not gadget.regAst:
+            gadget.buildAst()
         for reg,val in list(solves.items())[:]:
             if reg not in gadget.written_regs:
                 continue
-            if not gadget.regAst:
-                gadget.buildAst()
             regAst = gadget.regAst[reg]
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
                 solved[reg] = []
@@ -127,6 +138,46 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
 
     return [],[]
 
+def solveWriteGadgets(gadgets, solves):
+    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+    final_solved = []
+    candidates = findCandidatesWriteGadgets(gadgets)
+    ctx = initialize()
+    gwr = list(candidates.keys())
+    gwr.sort()
+    for w in gwr:
+        for gadget in candidates[w]:
+            if not gadget.memory_write_ast:
+                gadget.buildAst()
+            for addr,val in list(solves.items())[:]:
+                tmp_solved = dict()
+                mem_ast = gadget.memory_write_ast[0]
+                if mem_ast[1].getBitvectorSize() != 64:
+                    break
+                addrhasil = ctx.getModel(mem_ast[0] == addr).values()
+                valhasil = ctx.getModel(mem_ast[1] == val).values()
+                if not addrhasil or not valhasil:
+                    break
+                hasil = list(addrhasil) + list(valhasil)
+                refind_dict = {}
+#                code.interact(local=locals())
+                for v in hasil:
+                    alias = v.getVariable().getAlias()
+                    if 'STACK' not in alias:
+                        if alias in regs and alias not in refind_dict:
+                            refind_dict[alias] = v.getValue()
+                        else:
+                            hasil = False
+                            break
+                if hasil and refind_dict:
+                    hasil,_ = solveGadgets(gadgets[:], refind_dict)
+                if hasil:
+                    tmp_solved[addr] = hasil
+                    del solves[addr]
+                    final_solved.append((gadget, tmp_solved.values()))
+                    if not solves:
+                        return final_solved
+
 class ChainBuilder(object):
     def __init__(self, gadgets=list()):
         self.gadgets = gadgets
@@ -138,6 +189,12 @@ class ChainBuilder(object):
 
     def set_regs(self, regs):
         self.regs = regs
+
+    def set_writes(self, writes):
+        self.writes = writes
+
+    def solve_chain_write(self):
+        self.raw_chain = solveWriteGadgets(self.gadgets.copy(), self.writes)
 
     def build_chain(self):
         rop_chain = RopChain()
@@ -181,6 +238,7 @@ class ChainBuilder(object):
         gadgets = self.gadgets[:]
         for gadget in gadgets:
             gadget.regAst = None
+            gadget.memory_write_ast = None
         saved = pickle.dumps(gadgets)
         return saved
 

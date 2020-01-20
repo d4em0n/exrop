@@ -7,6 +7,7 @@ from itertools import combinations
 import code
 from pprint import pprint
 import sys
+from Solver import solveWriteGadgets
 
 
 STACK = 0x7fffff00
@@ -107,6 +108,8 @@ def analyzeGadget(instructions, ep, debug=False):
     sp = STACK
     gadget = ropGadget(ep)
     gadget.insns = instructions
+    gadget.is_memory_write = 0
+    gadget.memory_write_ast = []
     while instructions[pc] != b"\xc3":
         inst = Instruction()
         inst.setOpcode(instructions[pc])
@@ -131,6 +134,14 @@ def analyzeGadget(instructions, ep, debug=False):
             regname = r[0].getName()
             if regname in regs:
                 gadget.read_regs.add(regname)
+
+        if inst.isMemoryWrite():
+            for store_access in inst.getStoreAccess():
+                code.interact(local=locals())
+                addr_ast = store_access[0].getLeaAst()
+                val_ast = store_access[1]
+                gadget.memory_write_ast.append((addr_ast, val_ast))
+                gadget.is_memory_write += 1
 
         pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
         sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
@@ -358,9 +369,17 @@ sample_gadgets7 = {
     0x2000: ['pop rsi', 'add rsp, 0x18', 'pop rbx', 'pop rbp', 'ret'],
     0x3000: ['pop rdi', 'ret'],
 }
+
+sample_gadgets8 = {
+    0x1000: "mov qword ptr [rdx+0x10], r10 ; mov eax, 1 ; ret".split(";"),
+    0x2000: "pop r10; pop rdx; ret".split(";")
+}
+
 def test_analyze():
-    addr = 0
-    analyzeGadget(asm_per_ins("mov qword ptr [rdx+0x10], r10 ; mov eax, 1 ; ret".split(";"), addr), addr, True)
+    find_write = {0x41414141:0x42424242}
+    gadgets = buildSampleGadgets(sample_gadgets8)
+    hasil = solveWriteGadgets(gadgets, find_write)
+    print(hasil)
 #    analyzeGadget(asm_per_ins("xor rax, rax; add rax, 5; mov rbx, 10; add rbx, 5; add rsi, 5; inc rdi; sub rsi, rdi; ret".split(";"), addr),addr, True)
 
 def tests():
@@ -383,5 +402,5 @@ def tests():
         print("$RSP+0x{:04x} : 0x{:016x} # {}".format(i*8, ropchain[i], comments[i]))
 #    emulate(sample4_ins, entry_point, {})
 
-#test_analyze()
-tests()
+test_analyze()
+#tests()

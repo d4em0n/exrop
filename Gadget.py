@@ -1,5 +1,6 @@
 from triton import *
 from keystone import *
+import code
 
 STACK = 0x7fffff00
 MAX_FILL_STACK = 128
@@ -46,6 +47,9 @@ class Gadget(object):
         self.is_analyzed = False
         self.insstr = dict()
         self.insns = dict()
+        self.is_memory_write = 0
+        self.is_memory_read = 0 # not pop
+        self.memory_write_ast = []
 
     def __repr__(self):
         return "; ".join(self.insstr.values())
@@ -80,6 +84,7 @@ class Gadget(object):
         instructions = self.insns
         pc = self.addr
         self.regAst = dict()
+        self.memory_write_ast = []
         while instructions[pc] != b"\xc3":
             inst = Instruction()
             inst.setOpcode(instructions[pc])
@@ -87,6 +92,11 @@ class Gadget(object):
             ctx.processing(inst)
             pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
             sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
+            if inst.isMemoryWrite():
+                for store_access in inst.getStoreAccess():
+                    addr_ast = store_access[0].getLeaAst()
+                    val_ast = store_access[1]
+                    self.memory_write_ast.append((addr_ast, val_ast))
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
@@ -120,19 +130,30 @@ class Gadget(object):
             if debug:
                 print("DEBUG")
                 code.interact(local=locals())
-
+            pop = False
             for wrt in written:
                 regname = wrt[0].getName()
                 if regname in regs:
                     self.written_regs.add(regname)
                     newsp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
                     if (newsp - sp) == 8:
+                        pop = True
                         self.popped_regs.add(regname)
 
             for r in red:
                 regname = r[0].getName()
                 if regname in regs:
                     self.read_regs.add(regname)
+
+            if not pop and inst.isMemoryRead():
+                self.is_memory_read = 1
+
+            if inst.isMemoryWrite() and 'mov' in self.insstr[pc]:
+                for store_access in inst.getStoreAccess():
+                    addr_ast = store_access[0].getLeaAst()
+                    val_ast = store_access[1]
+                    self.memory_write_ast.append((addr_ast, val_ast))
+                    self.is_memory_write += 1
 
             pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
             sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
