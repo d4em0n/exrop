@@ -65,7 +65,7 @@ class Gadget(object):
     def analyzeGadget(self, debug=False):
         ctx = initialize()
         astCtxt = ctx.getAstContext()
-        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12"]
+        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
 
         for reg in regs:
             symbolizeReg(ctx, reg)
