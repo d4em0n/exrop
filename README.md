@@ -1,6 +1,6 @@
 # exrop
 Automatic ROP Chain Generation
-
+requirements : triton, ROPGagdget
 ``` python
 Python 3.6.9 (default, Nov  7 2019, 10:44:02)
 [GCC 8.3.0] on linux
