@@ -1,7 +1,7 @@
 # exrop
 Automatic ROP Chain Generation
 
-requirements : [Triton](https://github.com/JonathanSalwan/Triton), ]ROPGagdget](https://github.com/JonathanSalwan/ROPgadget)
+requirements : [Triton](https://github.com/JonathanSalwan/Triton), [ROPGagdget](https://github.com/JonathanSalwan/ROPgadget)
 
 ``` python
 from Exrop import Exrop
