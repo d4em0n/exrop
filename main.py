@@ -2,6 +2,7 @@
 from Gadget import *
 from Solver import ChainBuilder
 import code
+from Exrop import Exrop
 
 sample_gadgets2 = {
     0x1000: 'pop rsi; ret',
@@ -28,11 +29,7 @@ sample_gadgets7 = {
     0x2000: 'pop rsi; add rsp, 0x18; pop rbx; pop rbp; ret',
     0x3000: 'pop rdi; ret',
 }
-
-gadget = Gadget(0x1000)
-gadget.loadFromString('pop rsi; ret')
-gadget.analyzeGadget(debug=False)
-print(gadget.regAst)
+"""
 
 chain_builder = ChainBuilder()
 chain_builder.load_list_gadget_string(sample_gadgets7)
@@ -43,4 +40,9 @@ raw_chain = chain_builder.raw_chain
 build_chain = chain_builder.build_chain()
 build_chain.set_base_addr(0x400000)
 build_chain.dump()
-code.interact(local=globals())
+"""
+
+rop = Exrop("/bin/bash")
+rop.find_gadgets(cache=True)
+chain = rop.set_regs({'rdi':0x41414141, 'rsi': 0x42424242, 'rdx':0x43434343, 'rax':0x44444444})
+chain.dump()

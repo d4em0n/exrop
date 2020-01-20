@@ -1,4 +1,5 @@
 import code
+import pickle
 from RopChain import RopChain
 from Gadget import Gadget
 from itertools import combinations
@@ -67,6 +68,8 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
         for reg,val in list(solves.items())[:]:
             if reg not in gadget.written_regs:
                 continue
+            if not gadget.regAst:
+                gadget.buildAst()
             regAst = gadget.regAst[reg]
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
                 solved[reg] = []
@@ -122,7 +125,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
             written_regs.update(add_info)
             return final_solved, written_regs
 
-    print("nothing more! {}".format(solves.keys()))
     return [],[]
 
 class ChainBuilder(object):
@@ -174,3 +176,13 @@ class ChainBuilder(object):
                     chain[idxchain] = chain_item.getValue()
 
             rop_chain.add(gadget, chain)
+
+    def save_analyzed_gadgets(self):
+        gadgets = self.gadgets[:]
+        for gadget in gadgets:
+            gadget.regAst = None
+        saved = pickle.dumps(gadgets)
+        return saved
+
+    def load_analyzed_gadgets(self, pickled_data):
+        self.gadgets = pickle.loads(pickled_data)

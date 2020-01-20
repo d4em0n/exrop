@@ -17,10 +17,23 @@ class Exrop(object):
         self.binary = binary
         self.chain_builder = ChainBuilder()
 
-    def find_gadgets(self):
+    def find_gadgets(self, cache=False):
+        if cache:
+            fcname = "./{}.exrop_cache".format(self.binary.replace("/", "_"))
+            try:
+                with open(fcname, "rb") as fc:
+                    objpic = fc.read()
+                    self.chain_builder.load_analyzed_gadgets(objpic)
+                    return
+            except FileNotFoundError:
+                fc = open(fcname, "wb")
         gadgets = parseRopGadget(self.binary)
         self.chain_builder.load_list_gadget_string(gadgets)
         self.chain_builder.analyzeAll()
+        if cache:
+            objpic = self.chain_builder.save_analyzed_gadgets()
+            fc.write(objpic)
+            fc.close()
 
     def load_raw_gadgets(self, gadgets):
         pass

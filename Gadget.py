@@ -62,6 +62,35 @@ class Gadget(object):
             self.insns[addr] = asm_ins(ins)
             addr += len(self.insns[addr])
 
+    def buildAst(self):
+        ctx = initialize()
+        astCtxt = ctx.getAstContext()
+        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+
+        for reg in regs:
+            symbolizeReg(ctx, reg)
+        ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
+        ctx.setConcreteRegisterValue(ctx.registers.rbp, STACK+8*64)
+
+        for i in range(MAX_FILL_STACK):
+            tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
+            tmpb.setAlias("STACK{}".format(i))
+
+        sp = STACK
+        instructions = self.insns
+        pc = self.addr
+        self.regAst = dict()
+        while instructions[pc] != b"\xc3":
+            inst = Instruction()
+            inst.setOpcode(instructions[pc])
+            inst.setAddress(pc)
+            ctx.processing(inst)
+            pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
+            sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
+
+        for reg in self.written_regs:
+            self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
+
     def analyzeGadget(self, debug=False):
         ctx = initialize()
         astCtxt = ctx.getAstContext()
