@@ -13,7 +13,7 @@ class RopChain(object):
         sp = 0
         dump_str = ""
         for gadget,values in self.chains:
-            dump_str += "$RSP+0x{:04x} : 0x{:016x} # {}\n".format(sp, self.base_addr + gadget.addr, gadget.insstr)
+            dump_str += "$RSP+0x{:04x} : 0x{:016x} # {}\n".format(sp, self.base_addr + gadget.addr, gadget)
             for value in values:
                 dump_str += "$RSP+0x{:04x} : 0x{:016x}\n".format(sp, value)
                 sp += 8
