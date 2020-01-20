@@ -1,6 +1,6 @@
 import code
 from RopChain import RopChain
-from ropGadget import ropGadget
+from Gadget import Gadget
 from itertools import combinations
 from triton import *
 
@@ -126,13 +126,16 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
     return [],[]
 
 class ChainBuilder(object):
-    def __init__(self, set_regs, gadgets=list()):
+    def __init__(self, gadgets=list()):
         self.gadgets = gadgets
-        self.set_regs = set_regs
+        self.regs = dict()
         self.raw_chain = None
 
     def solve_chain(self):
-        self.raw_chain,_ = solveGadgets(self.gadgets, self.set_regs)
+        self.raw_chain,_ = solveGadgets(self.gadgets.copy(), self.regs)
+
+    def set_regs(self, regs):
+        self.regs = regs
 
     def build_chain(self):
         rop_chain = RopChain()
@@ -140,7 +143,7 @@ class ChainBuilder(object):
         return rop_chain
 
     def add_gadget_string(self, addr, gadget_string):
-        gadget = ropGadget(addr)
+        gadget = Gadget(addr)
         gadget.loadFromString(gadget_string)
         self.add_gadget(gadget)
 

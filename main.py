@@ -1,4 +1,5 @@
-from ropGadget import *
+#!/usr/bin/env python3
+from Gadget import *
 from Solver import ChainBuilder
 import code
 
@@ -28,16 +29,18 @@ sample_gadgets7 = {
     0x3000: 'pop rdi; ret',
 }
 
-gadget = ropGadget(0x1000)
+gadget = Gadget(0x1000)
 gadget.loadFromString('pop rsi; ret')
 gadget.analyzeGadget(debug=False)
 print(gadget.regAst)
 
-chain_builder = ChainBuilder(sample_gadgets1_find)
+chain_builder = ChainBuilder()
 chain_builder.load_list_gadget_string(sample_gadgets7)
+chain_builder.set_regs(sample_gadgets1_find)
 chain_builder.analyzeAll()
 chain_builder.solve_chain()
 raw_chain = chain_builder.raw_chain
 build_chain = chain_builder.build_chain()
 build_chain.set_base_addr(0x400000)
 build_chain.dump()
+code.interact(local=globals())
