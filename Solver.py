@@ -48,7 +48,7 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set()):
     return candidates
 
 def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
-    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12"]
+    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     final_solved = []
     solved_reg = dict()
     candidates = findCandidatesGadgets(gadgets, solves.keys())
