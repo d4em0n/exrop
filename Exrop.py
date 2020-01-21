@@ -1,4 +1,5 @@
 from Solver import ChainBuilder
+from RopChain import RopChain
 from os import popen
 
 def parseRopGadget(filename):
@@ -62,5 +63,21 @@ class Exrop(object):
                 tmpaddr += BSIZE
         return self.set_writes(writes, next_call)
 
-    def func_call(func_addr, args, rwaddr, type="cdecl"):
-        pass
+    def func_call(self, func_addr, args, rwaddr=None, type="sysv"):
+        order_reg = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+        regs = dict()
+        ropchain = RopChain()
+        for i in range(len(args)):
+            arg = args[i]
+            if isinstance(arg, str):
+                assert rwaddr, "Please define read write addr"
+                arg += "\x00"
+                chain = self.set_string({rwaddr:arg})
+                ropchain.merge_ropchain(chain)
+                regs[order_reg[i]] = rwaddr
+                rwaddr += len(arg)
+                continue
+            regs[order_reg[i]] = arg
+        chain = self.set_regs(regs, func_addr)
+        ropchain.merge_ropchain(chain)
+        return ropchain
