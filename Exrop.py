@@ -39,19 +39,19 @@ class Exrop(object):
     def load_raw_gadgets(self, gadgets):
         pass
 
-    def set_regs(self, regs):
+    def set_regs(self, regs, next_call=None):
         self.chain_builder.set_regs(regs)
         self.chain_builder.solve_chain()
-        ropchain = self.chain_builder.build_chain()
+        ropchain = self.chain_builder.build_chain(next_call)
         return ropchain
 
-    def set_writes(self, writes):
+    def set_writes(self, writes, next_call=None):
         self.chain_builder.set_writes(writes)
         self.chain_builder.solve_chain_write()
-        ropchain = self.chain_builder.build_chain()
+        ropchain = self.chain_builder.build_chain(next_call)
         return ropchain
 
-    def set_string(self, strs):
+    def set_string(self, strs, next_call=None):
         BSIZE = 8
         writes = dict()
         for addr,sstr in strs.items():
@@ -60,4 +60,7 @@ class Exrop(object):
                 tmpstr = int.from_bytes(bytes(sstr[i:i+BSIZE]+"\x00", 'utf-8'), 'little')
                 writes[addr+tmpaddr] = tmpstr
                 tmpaddr += BSIZE
-        return self.set_writes(writes)
+        return self.set_writes(writes, next_call)
+
+    def func_call(func_addr, args, rwaddr, type="cdecl"):
+        pass

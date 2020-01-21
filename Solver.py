@@ -196,9 +196,12 @@ class ChainBuilder(object):
     def solve_chain_write(self):
         self.raw_chain = solveWriteGadgets(self.gadgets.copy(), self.writes)
 
-    def build_chain(self):
+    def build_chain(self, next_call=None):
         rop_chain = RopChain()
         self.build_chain_recurse(self.raw_chain, rop_chain)
+        if next_call:
+            last_gadget = rop_chain.chains[-1]
+            last_gadget[1].append(next_call)
         return rop_chain
 
     def add_gadget_string(self, addr, gadget_string):
