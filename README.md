@@ -23,7 +23,7 @@ chain.dump()
 ```
 Output:
 ```
-write-regs gadget: rdi=0x41414141, rsi:0x42424242, rdx: 0x43434343, rax:0x44444444
+write-regs gadget: rdi=0x41414141, rsi:0x42424242, rdx: 0x43434343, rax:0x44444444, rbx=0x45454545
 $RSP+0x0000 : 0x00000000000060d0 # pop rbx; ret
 $RSP+0x0008 : 0x0000000044444444
 $RSP+0x0010 : 0x0000000000014852 # mov rax, rbx; pop rbx; ret
