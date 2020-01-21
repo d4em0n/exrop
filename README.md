@@ -17,6 +17,9 @@ chain.dump()
 print("write-string gadgets 0x41414141=\"Hello world!\\n\"")
 chain = rop.set_string({0x41414141: "Hello world!\n"})
 chain.dump()
+print("func-call gadgets 0x41414141(0x20, 0x30, \"Hello\")")
+chain = rop.func_call(0x41414141, (0x20, 0x30, "Hello"), 0x7fffff00)
+chain.dump()
 ```
 Output:
 ```
@@ -61,4 +64,22 @@ $RSP+0x0040 : 0x000000000000d91f # mov rax, rdi; ret
 $RSP+0x0048 : 0x0000000000004ce5 # pop rdi; ret
 $RSP+0x0050 : 0x0000000041414141
 $RSP+0x0058 : 0x000000000000e0fb # mov qword ptr [rdi + 8], rax; ret
+
+func-call gadgets 0x41414141(0x20, 0x30, "Hello")
+$RSP+0x0000 : 0x0000000000004ce5 # pop rdi; ret
+$RSP+0x0008 : 0x0000006f6c6c6548
+$RSP+0x0010 : 0x000000000000d91f # mov rax, rdi; ret
+$RSP+0x0018 : 0x0000000000004ce5 # pop rdi; ret
+$RSP+0x0020 : 0x000000007ffffef8
+$RSP+0x0028 : 0x000000000000e0fb # mov qword ptr [rdi + 8], rax; ret
+$RSP+0x0030 : 0x0000000000004ce5 # pop rdi; ret
+$RSP+0x0038 : 0x0000000000000020
+$RSP+0x0040 : 0x000000000000629c # pop rsi; ret
+$RSP+0x0048 : 0x0000000000000030
+$RSP+0x0050 : 0x0000000000003a62 # pop rdx; ret
+$RSP+0x0058 : 0x000000007fffff00
+$RSP+0x0060 : 0x0000000041414141
+
+python3 tests.py  1,48s user 0,05s system 97% cpu 1,566 total
+
 ```
