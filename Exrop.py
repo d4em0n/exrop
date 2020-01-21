@@ -51,3 +51,13 @@ class Exrop(object):
         ropchain = self.chain_builder.build_chain()
         return ropchain
 
+    def set_string(self, strs):
+        BSIZE = 8
+        writes = dict()
+        for addr,sstr in strs.items():
+            tmpaddr = 0
+            for i in range(0, len(sstr), BSIZE):
+                tmpstr = int.from_bytes(bytes(sstr[i:i+BSIZE]+"\x00", 'utf-8'), 'little')
+                writes[addr+tmpaddr] = tmpstr
+                tmpaddr += BSIZE
+        return self.set_writes(writes)

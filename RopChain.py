@@ -9,6 +9,10 @@ class RopChain(object):
         self.chains.append((gadget, values))
         self.dump_str = None
 
+    def merge_ropchain(self, ropchain):
+        for gadget,values in ropchain.chains:
+            self.add(gadget, values)
+
     def dump(self):
         sp = 0
         dump_str = ""
