@@ -63,7 +63,7 @@ class Exrop(object):
                 tmpaddr += BSIZE
         return self.set_writes(writes, next_call)
 
-    def func_call(self, func_addr, args, rwaddr=None, type="sysv"):
+    def func_call(self, func_addr, args, rwaddr=None, convention="sysv"):
         order_reg = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
         regs = dict()
         ropchain = RopChain()

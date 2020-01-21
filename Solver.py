@@ -56,7 +56,7 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set()):
 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, not_write_regs)
-    candidates = candidates_defined + candidates_pop + candidates_write + candidates_depends
+    candidates = candidates_defined + candidates_pop + candidates_write + candidates_depends # ordered by useful gadgets
     return candidates
 
 def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
@@ -240,8 +240,8 @@ class ChainBuilder(object):
     def save_analyzed_gadgets(self):
         gadgets = self.gadgets[:]
         for gadget in gadgets:
-            gadget.regAst = None
-            gadget.memory_write_ast = None
+            gadget.regAst = None # AstNode can't be cached
+            gadget.memory_write_ast = None # AstNode can't be cached
         saved = pickle.dumps(gadgets)
         return saved
 
