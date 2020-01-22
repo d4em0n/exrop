@@ -35,6 +35,13 @@ def asm_ins(code):
     insns = bytes(ks.asm(code)[0])
     return insns
 
+TYPE_RETURN = 0
+TYPE_JMP_REG = 1
+TYPE_JMP_MEM = 2
+TYPE_CALL_REG = 3
+TYPE_CALL_MEM = 4
+TYPE_UNKNOWN = 5
+
 class Gadget(object):
     def __init__(self, addr):
         self.addr = addr
@@ -51,6 +58,8 @@ class Gadget(object):
         self.is_memory_write = 0
         self.is_memory_read = 0 # not pop
         self.memory_write_ast = []
+        self.end_type = TYPE_RETURN # default ret
+        self.end_ast = None
 
     def __repr__(self):
         return "; ".join(self.insstr.values())
@@ -103,6 +112,7 @@ class Gadget(object):
             self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
 
     def analyzeGadget(self, debug=False):
+        BSIZE = 64
         ctx = initialize()
         astCtxt = ctx.getAstContext()
         regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
@@ -121,11 +131,27 @@ class Gadget(object):
         instructions = self.insns
         pc = self.addr
 
-        while instructions[pc] != b"\xc3":
+        while True:
             inst = Instruction()
             inst.setOpcode(instructions[pc])
             inst.setAddress(pc)
             ctx.processing(inst)
+
+            if inst.isControlFlow(): # check if end of gadget
+                sp_after = ctx.getConcreteRegisterValue(ctx.registers.rsp)
+                if sp_after - sp == BSIZE:
+                    type_end = TYPE_CALL_REG
+                    if inst.isMemoryRead():
+                        type_end = TYPE_CALL_MEM
+                        self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
+                elif sp == sp_after:
+                    type_end = TYPE_JMP_REG
+                    if inst.isMemoryRead() and not inst.isBranch():
+                        type_end = TYPE_JMP_MEM
+                        self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
+                    else:
+                        type_end = TYPE_UNKNOWN
+                break
 
             written = inst.getWrittenRegisters()
             red = inst.getReadRegisters()
