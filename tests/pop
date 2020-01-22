@@ -1,0 +1,18 @@
+{
+    "gadgets": {
+        0x1000: 'pop rsi; ret',
+        0x2000: 'mov rbx, rsi; ret',
+        0x3000: 'mov rax, rcx; ret',
+        0x4000: 'mov rcx, rbx; add rcx, 100; ret',
+        0x5000: 'mov rdx, rsi; ret',
+        0x6000: 'mov rdi, rax; ret',
+    },
+    "find": {
+        "rdi": 0x41414242,
+        "rsi": 0xffffffff,
+        "rdx": 0x43434343,
+        "rax": 0x0b0c0a0d,
+        "rbx": 0xddccbbaa,
+        "rcx": 0xffeeffee
+    }
+}

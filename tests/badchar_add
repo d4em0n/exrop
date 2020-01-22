@@ -1,0 +1,13 @@
+{
+    "gadgets": {
+        0x0a10: 'pop rsi; ret',
+        0x1000: 'pop rsi; pop rdi; ret',
+        0x2000: 'mov rbx, rsi; ret',
+        0x3000: 'mov rbx, rcx; ret',
+        0x4000: 'mov rcx, rbx; add rcx, 20; ret',
+    },
+    "find": {
+        "rcx": 0xffee0aee
+    },
+    "badchars": b"\x0a",
+}
