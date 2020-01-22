@@ -120,12 +120,33 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
         tmp_solved = dict()
         tmp_written_regs = set()
         intersect = False
+
+        if gadget.end_type != TYPE_RETURN and not gadget.end_gadget:
+            next_gadget = None
+#            print("handling no return gadget")
+            diff = 0
+            if gadget.end_type == TYPE_JMP_REG:
+                next_gadget = findForRet(gadgets, 0, set(list(solved.keys())), avoid_char=avoid_char)
+            elif gadget.end_type == TYPE_CALL_REG:
+                next_gadget = findForRet(gadgets, 8, set(list(solved.keys())), avoid_char=avoid_char)
+                diff = 8
+            if not next_gadget:
+                continue
+#            print("Found ret @ 0x{:08x}".format(next_gadget.addr))
+            gadget.end_gadget = next_gadget
+            gadget.diff_sp += next_gadget.diff_sp - diff
+            solves['rip'] = next_gadget.addr
+
         if not gadget.regAst:
             gadget.buildAst()
         for reg,val in list(solves.items())[:]:
-            if reg not in gadget.written_regs:
+            if reg != 'rip' and reg not in gadget.written_regs:
                 continue
-            regAst = gadget.regAst[reg]
+
+            if reg == 'rip':
+                regAst = gadget.end_ast
+            else:
+                regAst = gadget.regAst[reg]
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
                 tmp_solved[reg] = []
                 solved_reg[reg] = val
@@ -176,7 +197,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             hasil = False
                             refind_dict = False
                             break
-
             if refind_dict:
                 if notFirst:
                     hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False, avoid_char)
@@ -189,34 +209,9 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 solved_reg[reg] = val
                 del solves[reg]
 
+        solves.pop('rip', None) # clear end gadget ast
         if not tmp_solved:
             continue
-
-        if gadget.end_type != TYPE_RETURN:
-            next_gadget = None
-#            print("handling no return gadget")
-            if gadget.end_type == TYPE_JMP_REG:
-                next_gadget = findForRet(gadgets, 0, set(list(solved.keys())), avoid_char=avoid_char)
-            elif gadget.end_type == TYPE_CALL_REG:
-                next_gadget = findForRet(gadgets, 8, set(list(solved.keys())), avoid_char=avoid_char)
-            if not next_gadget:
-                continue
-
-#            print("Found ret @ 0x{:08x}".format(next_gadget.addr))
-            refind = {gadget.end_ast: next_gadget.addr}
-#            print(refind)
-            if notFirst:
-                hasil,kk = solveGadgets(candidates[:], refind, written_regs.copy(), False, avoid_char)
-            else:
-                hasil,kk = solveGadgets(candidates[:], refind, {}, True, avoid_char)
-
-            if not hasil:
-                continue
-
-            tmp_written_regs.update(kk)
-            tmp_solved[gadget.end_ast] = hasil
-            gadget.end_gadget = next_gadget
-            gadget.diff_sp += next_gadget.diff_sp
 
         tmp_written_regs.update(gadget.written_regs)
         if set.intersection(tmp_written_regs, set(list(solved.keys()))):

@@ -144,30 +144,6 @@ class Gadget(object):
             inst.setAddress(pc)
             ctx.processing(inst)
 
-            if inst.isControlFlow(): # check if end of gadget
-                type_end = 0
-                sp_after = ctx.getConcreteRegisterValue(ctx.registers.rsp)
-                if (sp - sp_after) == BSIZE:
-                    if inst.isMemoryRead():
-                        type_end = TYPE_CALL_MEM
-                        self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
-                    else:
-                        type_end = TYPE_CALL_REG
-                        self.end_ast = str(ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rip).getAst(), True))
-                elif sp == sp_after:
-                    if inst.isMemoryRead() and not inst.isBranch():
-                        type_end = TYPE_JMP_MEM
-                        self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
-                    else:
-                        type_end = TYPE_JMP_REG
-                        self.end_ast = str(ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rip).getAst(), True))
-                elif sp_after - sp == BSIZE:
-                    type_end = TYPE_RETURN
-                else:
-                    type_end = TYPE_UNKNOWN
-                self.end_type = type_end
-#                code.interact(local=locals())
-                break
 
             written = inst.getWrittenRegisters()
             red = inst.getReadRegisters()
@@ -185,6 +161,31 @@ class Gadget(object):
                 regname = r[0].getName()
                 if regname in regs:
                     self.read_regs.add(regname)
+
+            if inst.isControlFlow(): # check if end of gadget
+                type_end = 0
+                sp_after = ctx.getConcreteRegisterValue(ctx.registers.rsp)
+                if (sp - sp_after) == BSIZE:
+                    if inst.isMemoryRead():
+                        type_end = TYPE_CALL_MEM
+                        self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
+                    else:
+                        type_end = TYPE_CALL_REG
+                        self.end_ast = ctx.getSymbolicRegister(ctx.registers.rip).getAst()
+                elif sp == sp_after:
+                    if inst.isMemoryRead() and not inst.isBranch():
+                        type_end = TYPE_JMP_MEM
+                        self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
+                    else:
+                        type_end = TYPE_JMP_REG
+                        self.end_ast = ctx.getSymbolicRegister(ctx.registers.rip).getAst()
+                elif sp_after - sp == BSIZE:
+                    type_end = TYPE_RETURN
+                else:
+                    type_end = TYPE_UNKNOWN
+                self.end_type = type_end
+#                code.interact(local=locals())
+                break
 
             if not pop and inst.isMemoryRead():
                 self.is_memory_read = 1
