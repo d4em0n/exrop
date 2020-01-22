@@ -1,0 +1,10 @@
+{
+    "gadgets": {
+        0x1000: 'pop rsi; ret',
+        0x2000: 'mov rbx, rsi; pop rsi; ret',
+        0x3000: 'mov rdi, rbx; pop rsi; ret',
+    },
+    "find": {
+        "rdi": "rsi",
+    }
+}

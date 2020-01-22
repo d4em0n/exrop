@@ -15,6 +15,7 @@ def initialize():
 def symbolizeReg(ctx, regname):
     tmp = ctx.symbolizeRegister(getattr(ctx.registers,regname))
     tmp.setAlias(regname)
+    return ctx.getSymbolicRegister(getTritonReg(ctx, regname)).getAst()
 
 def getTritonReg(ctx, regname):
     return getattr(ctx.registers, regname)
@@ -106,8 +107,9 @@ class Gadget(object):
         astCtxt = ctx.getAstContext()
         regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
 
+        reglist = dict()
         for reg in regs:
-            symbolizeReg(ctx, reg)
+            reglist[reg] = symbolizeReg(ctx, reg)
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
         ctx.setConcreteRegisterValue(ctx.registers.rbp, STACK+8*64)
 
@@ -157,19 +159,24 @@ class Gadget(object):
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
-            simpl = ctx.simplify(self.regAst[reg], True).getChildren()
-            if not simpl:
+            simplified = ctx.simplify(self.regAst[reg], True)
+            if str(simplified) in regs:
+                self.defined_regs[reg] = str(simplified)
+                continue
+            childs = simplified.getChildren()
+            if not childs:
                 continue
             try:
-                assert(len(simpl) == 2)
+                assert(len(childs) == 2)
             except:
                 code.interact(local=locals())
             try:
-                simpl[1].getInteger()
+                childs[1].getInteger()
             except TypeError:
                 continue
-            self.defined_regs[reg] = simpl[0].getInteger()
-        defregs = set(self.defined_regs.keys())
+            self.defined_regs[reg] = childs[0].getInteger()
+        defregs = set(filter(lambda i: isinstance(self.defined_regs[i],int),
+                              self.defined_regs.keys()))
         self.depends_regs = set.difference(self.read_regs, defregs)
 
         self.diff_sp = sp - STACK

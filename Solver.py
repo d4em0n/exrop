@@ -111,35 +111,41 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 continue
             regAst = gadget.regAst[reg]
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
-                solved[reg] = []
                 tmp_solved[reg] = []
                 solved_reg[reg] = val
                 del solves[reg]
                 continue
 
-            if avoid_char:
-                simpl = ctx.simplify(regAst, True)
-                childs = simpl.getChildren()
-                if not childs:
-                    childs = [simpl]
-                filterbyte = []
-                lval = len(val.to_bytes(8, 'little').rstrip(b"\x00"))
-                hasil = False
-                for child in childs:
-                    for char in avoid_char:
-                        fb = filter_byte(astCtxt, child, char, lval)
-                        filterbyte.extend(fb)
-                if filterbyte:
-                    filterbyte.append(regAst == val)
-                    filterbyte = astCtxt.land(filterbyte)
-                    hasil = ctx.getModel(filterbyte).values()
-                if not hasil: # try to find again
+            refind_dict = {}
+            if isinstance(val, str): # probably registers
+                if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg], str):
+                    refind_dict[gadget.defined_regs[reg]] = val
+                    hasil = []
+                else:
+                    continue
+            else:
+                if avoid_char:
+                    simpl = ctx.simplify(regAst, True)
+                    childs = simpl.getChildren()
+                    if not childs:
+                        childs = [simpl]
+                    filterbyte = []
+                    lval = len(val.to_bytes(8, 'little').rstrip(b"\x00"))
+                    hasil = False
+                    for child in childs:
+                        for char in avoid_char:
+                            fb = filter_byte(astCtxt, child, char, lval)
+                            filterbyte.extend(fb)
+                    if filterbyte:
+                        filterbyte.append(regAst == val)
+                        filterbyte = astCtxt.land(filterbyte)
+                        hasil = ctx.getModel(filterbyte).values()
+                    if not hasil: # try to find again
+                        hasil = ctx.getModel(regAst == val).values()
+
+                else:
                     hasil = ctx.getModel(regAst == val).values()
 
-            else:
-                hasil = ctx.getModel(regAst == val).values()
-
-            refind_dict = {}
             for v in hasil:
                 alias = v.getVariable().getAlias()
                 if 'STACK' not in alias:
@@ -174,7 +180,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
             intersect = True
         solved.update(tmp_solved)
         written_regs.update(tmp_written_regs)
-        if intersect:
+        if intersect and len(written_regs_by_gadget) > 0:
             for i in range(len(written_regs_by_gadget)-1, -1, -1):
                 if set.intersection(set(tmp_solved.keys()), written_regs_by_gadget[i]):
                     final_solved.insert(i+1, (gadget, tmp_solved.values()))
