@@ -1,7 +1,7 @@
 import code
 import pickle
 from RopChain import RopChain
-from Gadget import Gadget
+from Gadget import *
 from itertools import combinations
 from triton import *
 
@@ -31,6 +31,22 @@ def findCandidatesWriteGadgets(gadgets, avoid_char=None):
                 continue
             candidates[isw].append(gadget)
     return candidates
+
+def findForRet(gadgets, min_diff_sp=0, not_write_regs=set(), avoid_char=None):
+    for gadget in list(gadgets):
+        badchar = False
+        if avoid_char:
+            for char in avoid_char:
+                addrb = gadget.addr.to_bytes(8, 'little')
+                if char in addrb:
+                    badchar = True
+                    break
+        if badchar:
+            continue
+        if set.intersection(not_write_regs, gadget.written_regs):
+            continue
+        if not gadget.is_memory_write and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp >= min_diff_sp:
+            return gadget
 
 def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=None):
     candidates_pop = []
@@ -175,6 +191,33 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 
         if not tmp_solved:
             continue
+
+        if gadget.end_type != TYPE_RETURN:
+            next_gadget = None
+#            print("handling no return gadget")
+            if gadget.end_type == TYPE_JMP_REG:
+                next_gadget = findForRet(gadgets, 0, set(list(solved.keys())), avoid_char=avoid_char)
+            elif gadget.end_type == TYPE_CALL_REG:
+                next_gadget = findForRet(gadgets, 8, set(list(solved.keys())), avoid_char=avoid_char)
+            if not next_gadget:
+                continue
+
+#            print("Found ret @ 0x{:08x}".format(next_gadget.addr))
+            refind = {gadget.end_ast: next_gadget.addr}
+#            print(refind)
+            if notFirst:
+                hasil,kk = solveGadgets(candidates[:], refind, written_regs.copy(), False, avoid_char)
+            else:
+                hasil,kk = solveGadgets(candidates[:], refind, {}, True, avoid_char)
+
+            if not hasil:
+                continue
+
+            tmp_written_regs.update(kk)
+            tmp_solved[gadget.end_ast] = hasil
+            gadget.end_gadget = next_gadget
+            gadget.diff_sp += next_gadget.diff_sp
+
         tmp_written_regs.update(gadget.written_regs)
         if set.intersection(tmp_written_regs, set(list(solved.keys()))):
             intersect = True

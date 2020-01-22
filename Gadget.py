@@ -60,13 +60,20 @@ class Gadget(object):
         self.memory_write_ast = []
         self.end_type = TYPE_RETURN # default ret
         self.end_ast = None
+        self.end_gadget = 0 # return gadget to fix no-return gadgets
 
     def __repr__(self):
-        return "; ".join(self.insstr.values())
+        append_com = ""
+        if self.end_gadget:
+            append_com = ": next -> (0x{:08x}) # {}".format(self.end_gadget.addr, self.end_gadget)
+        return "; ".join(self.insstr.values()) + append_com
 #        return "addr : {}\nwritten : {}\nread : {}\npopped : {}\ndepends : {}\ndiff_sp: {}".format(self.addr, self.written_regs, self.read_regs, self.popped_regs, self.depends_regs, self.diff_sp)
 
     def __str__(self):
-        return "; ".join(self.insstr.values())
+        append_com = ""
+        if self.end_gadget:
+            append_com = ": next -> (0x{:08x}) # {}".format(self.end_gadget.addr, self.end_gadget)
+        return "; ".join(self.insstr.values()) + append_com
 #        return "addr : {}\nwritten : {}\nread : {}\npopped : {}\ndepends : {}\ndiff_sp: {}\n".format(self.addr, self.written_regs, self.read_regs, self.popped_regs, self.depends_regs, self.diff_sp)
 
     def loadFromString(self, instructions):
@@ -112,7 +119,7 @@ class Gadget(object):
             self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
 
     def analyzeGadget(self, debug=False):
-        BSIZE = 64
+        BSIZE = 8
         ctx = initialize()
         astCtxt = ctx.getAstContext()
         regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
@@ -138,19 +145,28 @@ class Gadget(object):
             ctx.processing(inst)
 
             if inst.isControlFlow(): # check if end of gadget
+                type_end = 0
                 sp_after = ctx.getConcreteRegisterValue(ctx.registers.rsp)
-                if sp_after - sp == BSIZE:
-                    type_end = TYPE_CALL_REG
+                if (sp - sp_after) == BSIZE:
                     if inst.isMemoryRead():
                         type_end = TYPE_CALL_MEM
                         self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
+                    else:
+                        type_end = TYPE_CALL_REG
+                        self.end_ast = str(ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rip).getAst(), True))
                 elif sp == sp_after:
-                    type_end = TYPE_JMP_REG
                     if inst.isMemoryRead() and not inst.isBranch():
                         type_end = TYPE_JMP_MEM
                         self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
                     else:
-                        type_end = TYPE_UNKNOWN
+                        type_end = TYPE_JMP_REG
+                        self.end_ast = str(ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rip).getAst(), True))
+                elif sp_after - sp == BSIZE:
+                    type_end = TYPE_RETURN
+                else:
+                    type_end = TYPE_UNKNOWN
+                self.end_type = type_end
+#                code.interact(local=locals())
                 break
 
             written = inst.getWrittenRegisters()
@@ -204,6 +220,8 @@ class Gadget(object):
         defregs = set(filter(lambda i: isinstance(self.defined_regs[i],int),
                               self.defined_regs.keys()))
         self.depends_regs = set.difference(self.read_regs, defregs)
+        if isinstance(self.end_ast, str): # can't handle symbolic end gadget right now:
+            self.depends_regs.add(self.end_ast)
 
         self.diff_sp = sp - STACK
         self.is_analyzed = True
