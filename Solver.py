@@ -12,9 +12,18 @@ def initialize():
     ctx.setAstRepresentationMode(AST_REPRESENTATION.PYTHON)
     return ctx
 
-def findCandidatesWriteGadgets(gadgets):
+def findCandidatesWriteGadgets(gadgets, avoid_char=None):
     candidates = {}
     for gadget in list(gadgets):
+        badchar = False
+        if avoid_char:
+            for char in avoid_char:
+                addrb = gadget.addr.to_bytes(8, 'little')
+                if char in addrb:
+                    badchar = True
+                    break
+        if badchar:
+            continue
         if gadget.is_memory_write:
             isw = gadget.is_memory_write
             if not isw in candidates:
@@ -23,7 +32,7 @@ def findCandidatesWriteGadgets(gadgets):
             candidates[isw].append(gadget)
     return candidates
 
-def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set()):
+def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=None):
     candidates_pop = []
     candidates_write = []
     candidates_depends = []
@@ -37,6 +46,15 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set()):
                 if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read:
                     continue
 
+                badchar = False
+                if avoid_char:
+                    for char in avoid_char:
+                        addrb = gadget.addr.to_bytes(8, 'little')
+                        if char in addrb:
+                            badchar = True
+                            break
+                if badchar:
+                    continue
                 if reg_comb.issubset(set(gadget.defined_regs.keys())):
                     candidates_defined.append(gadget)
                     gadgets.remove(gadget)
@@ -72,7 +90,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     final_solved = []
     solved_reg = dict()
-    candidates = findCandidatesGadgets(gadgets, solves.keys())
+    candidates = findCandidatesGadgets(gadgets, solves.keys(), avoid_char=avoid_char)
     spi = 0
     written_regs = set()
     refind_solves = dict()
@@ -174,10 +192,10 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 
     return [],[]
 
-def solveWriteGadgets(gadgets, solves):
+def solveWriteGadgets(gadgets, solves, avoid_char=None):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     final_solved = []
-    candidates = findCandidatesWriteGadgets(gadgets)
+    candidates = findCandidatesWriteGadgets(gadgets, avoid_char=avoid_char)
     ctx = initialize()
     gwr = list(candidates.keys())
     gwr.sort()
