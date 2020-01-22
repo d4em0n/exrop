@@ -3,10 +3,12 @@
         0x0a10: 'pop rdi; ret',
         0x1000: 'pop rsi; pop rdi; ret',
         0x2000: 'pop rdx; ret',
-        0x4000: "xor rdx, rdi; ret"
+        0x4000: "xor rdx, rdi; ret",
+        0x5000: "xor rdi, rsi; ret"
     },
     "find": {
         "rdx": 0x0abb0acc,
+        "rdi": 0xbb0acc0a,
     },
     "badchars": b"\x0a",
 }
