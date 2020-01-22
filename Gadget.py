@@ -127,9 +127,6 @@ class Gadget(object):
 
             written = inst.getWrittenRegisters()
             red = inst.getReadRegisters()
-            if debug:
-                print("DEBUG")
-                code.interact(local=locals())
             pop = False
             for wrt in written:
                 regname = wrt[0].getName()

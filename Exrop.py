@@ -40,9 +40,9 @@ class Exrop(object):
     def load_raw_gadgets(self, gadgets):
         pass
 
-    def set_regs(self, regs, next_call=None):
+    def set_regs(self, regs, next_call=None, avoid_char=None):
         self.chain_builder.set_regs(regs)
-        self.chain_builder.solve_chain()
+        self.chain_builder.solve_chain(avoid_char)
         ropchain = self.chain_builder.build_chain(next_call)
         return ropchain
 

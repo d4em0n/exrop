@@ -59,7 +59,16 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set()):
     candidates = candidates_defined + candidates_pop + candidates_write + candidates_depends # ordered by useful gadgets
     return candidates
 
-def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
+def extract_byte(bv, pos):
+    return (bv >> pos*8) & 0xff
+
+def filter_byte(astctxt, bv, bc, bsize):
+    nbv = []
+    for i in range(bsize):
+        nbv.append(astctxt.lnot(astctxt.equal(astctxt.extract(i*8+7, i*8, bv),astctxt.bv(bc, 8))))
+    return nbv
+
+def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=None):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     final_solved = []
     solved_reg = dict()
@@ -68,6 +77,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
     written_regs = set()
     refind_solves = dict()
     ctx = initialize()
+    astCtxt = ctx.getAstContext()
     solved = {}
     reglist = []
     written_regs_by_gadget = []
@@ -89,7 +99,27 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
                 del solves[reg]
                 continue
 
-            hasil = ctx.getModel(regAst == val).values()
+            if avoid_char:
+                simpl = ctx.simplify(regAst, True)
+                childs = simpl.getChildren()
+                if not childs:
+                    childs = [simpl]
+                filterbyte = []
+                lval = len(val.to_bytes(8, 'little').rstrip(b"\x00"))
+                hasil = False
+                for child in childs:
+                    for char in avoid_char:
+                        fb = filter_byte(astCtxt, child, char, lval)
+                        filterbyte.extend(fb)
+                if filterbyte:
+                    filterbyte.append(regAst == val)
+                    filterbyte = astCtxt.land(filterbyte)
+                    hasil = ctx.getModel(filterbyte).values()
+                if not hasil: # try to find again
+                    hasil = ctx.getModel(regAst == val).values()
+
+            else:
+                hasil = ctx.getModel(regAst == val).values()
 
             refind_dict = {}
             for v in hasil:
@@ -100,12 +130,18 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False):
                     else:
                         hasil = False
                         break
+                elif avoid_char: # check if stack is popped contain avoid char
+                    for char in avoid_char:
+                        if char in val.to_bytes(8, 'little'):
+                            hasil = False
+                            refind_dict = False
+                            break
 
             if refind_dict:
                 if notFirst:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False)
+                    hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False, avoid_char)
                 else:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True)
+                    hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char)
                 tmp_written_regs.update(kk)
 
             if hasil:
@@ -184,8 +220,8 @@ class ChainBuilder(object):
         self.regs = dict()
         self.raw_chain = None
 
-    def solve_chain(self):
-        self.raw_chain,_ = solveGadgets(self.gadgets.copy(), self.regs)
+    def solve_chain(self, avoid_char):
+        self.raw_chain,_ = solveGadgets(self.gadgets.copy(), self.regs, avoid_char=avoid_char)
 
     def set_regs(self, regs):
         self.regs = regs
