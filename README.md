@@ -107,7 +107,7 @@ bss = libc.bss()
 
 
 rop = Exrop(binname)
-rop.find_gadgets(cache=True)
+rop.find_gadgets(cache=True) # it will take a long time for first analyze, keep waiting
 print("open('/etc/passwd', 0)")
 chain = rop.func_call(open, ("/etc/passwd", 0), bss)
 chain.dump()
