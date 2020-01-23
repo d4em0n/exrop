@@ -1,4 +1,4 @@
-from Solver import ChainBuilder
+from ChainBuilder import ChainBuilder
 from Exrop import Exrop
 from Gadget import *
 import sys
