@@ -1,4 +1,4 @@
-from Solver import ChainBuilder
+from ChainBuilder import ChainBuilder
 from RopChain import RopChain
 from os import popen
 
