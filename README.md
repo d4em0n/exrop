@@ -1,8 +1,15 @@
 # exrop
 Automatic ROP Chain Generation
 
-requirements : [Triton](https://github.com/JonathanSalwan/Triton), [ROPGagdget](https://github.com/JonathanSalwan/ROPgadget)
+Requirements : [Triton](https://github.com/JonathanSalwan/Triton), [ROPGadget](https://github.com/JonathanSalwan/ROPgadget)
 
+Features:
+- set registers (`rdi=0xxxxxx, rsi=0xxxxxx`)
+- set register to register (`rdi=rax`)
+- write to mem
+- write string/bytes to mem
+- function call (`open('/etc/passwd',0)`)
+- pass register in function call (`read('rax', bss, 0x100)`)
 ``` python
 from Exrop import Exrop
 
