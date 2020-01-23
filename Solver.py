@@ -1,6 +1,6 @@
 import code
 import pickle
-from itertools import combinations
+from itertools import combinations, chain
 from triton import *
 from Gadget import *
 
@@ -131,6 +131,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
     solved = {}
     reglist = []
     written_regs_by_gadget = []
+    solved_regs_by_gadget = []
     for gadget in candidates:
         tmp_solved = dict()
         tmp_written_regs = set()
@@ -218,7 +219,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
             if hasil:
                 tmp_solved[reg] = hasil
                 solved_reg[reg] = val
-                del solves[reg]
 
         if not tmp_solved:
             continue
@@ -256,20 +256,34 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
         tmp_written_regs.update(gadget.written_regs)
         if set.intersection(tmp_written_regs, set(list(solved.keys()))):
             intersect = True
-        solved.update(tmp_solved)
-        written_regs.update(tmp_written_regs)
+        tmp_solved_regs = tuple(tmp_solved.keys())
         if intersect and len(written_regs_by_gadget) > 0:
             for i in range(len(written_regs_by_gadget)-1, -1, -1):
-                if set.intersection(set(tmp_solved.keys()), written_regs_by_gadget[i]):
+                solved_before = set(chain(*solved_regs_by_gadget[:i+1]))
+                if set.intersection(set(tmp_solved.keys()), written_regs_by_gadget[i]) and not set.intersection(solved_before, tmp_written_regs):
                     final_solved.insert(i+1, (gadget, tmp_solved.values()))
                     written_regs_by_gadget.insert(i+1, tmp_written_regs)
+                    solved_regs_by_gadget.insert(i+1, tmp_solved_regs)
                     break
-                elif i == 0:
-                    final_solved.insert(0, (gadget, tmp_solved.values()))
-                    written_regs_by_gadget.insert(0, tmp_written_regs)
+
+                regs_used_after = set(chain(*written_regs_by_gadget))
+                if i == 0:
+                    if not set.intersection(set(tmp_solved.keys()), regs_used_after):
+                        final_solved.insert(0, (gadget, tmp_solved.values()))
+                        written_regs_by_gadget.insert(0, tmp_written_regs)
+                        solved_regs_by_gadget.insert(0, tmp_solved_regs)
+                    else:
+                        tmp_solved = None # can't intersect gadget
         else:
             final_solved.append((gadget, tmp_solved.values()))
             written_regs_by_gadget.append(tmp_written_regs)
+            solved_regs_by_gadget.append(tmp_solved_regs)
+        if not tmp_solved:
+            continue
+        for reg in tmp_solved:
+            del solves[reg]
+        solved.update(tmp_solved)
+        written_regs.update(tmp_written_regs)
         if not solves:
             written_regs.update(add_info)
             return final_solved, written_regs

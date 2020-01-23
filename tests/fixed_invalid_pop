@@ -1,0 +1,13 @@
+{
+    "gadgets": {
+        0x00000000001306d9: "pop rdx; pop rsi; ret",
+        0x00000000001663b1: "pop rax; pop rdx; pop rbx; ret",
+        0x0000000000091ec4: "mov rax, rdx; add rsp, 8; ret",
+        0x00000000001663b1: "pop rax; pop rdx; pop rbx; ret",
+        0x00000000001663b5: "pop rdx; pop rbx; ret",
+        0x000000000002155f: "pop rdi; ret"
+    },
+    "find": {
+        'rdi':0x41414141, 'rsi': 0x42424242, 'rdx':0x43434343, 'rax':0x44444444, 'rbx': 0x45454545
+    }
+}
