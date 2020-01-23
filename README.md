@@ -4,6 +4,7 @@ Automatic ROP Chain Generation
 Requirements : [Triton](https://github.com/JonathanSalwan/Triton), [ROPGadget](https://github.com/JonathanSalwan/ROPgadget)
 
 Features:
+- handling non-return gadgets (jmp reg, call reg)
 - set registers (`rdi=0xxxxxx, rsi=0xxxxxx`)
 - set register to register (`rdi=rax`)
 - write to mem
