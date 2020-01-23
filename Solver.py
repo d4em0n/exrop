@@ -54,16 +54,14 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=
     candidates_depends = []
     candidates_defined = []
     candidates_ret = [] # always
+    candidates_no_return = []
     depends_regs = set()
     for i in range(len(regs_write), 0, -1):
         reg_combs = combinations(regs_write, i)
         for comb in reg_combs:
             reg_comb = set(comb)
             for gadget in list(gadgets):
-                if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read:
-                    continue
-
-                if gadget.end_type == TYPE_UNKNOWN:
+                if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read or gadget.is_memory_write or gadget.end_type == TYPE_UNKNOWN:
                     gadgets.remove(gadget)
                     continue
 
@@ -78,6 +76,13 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=
                     continue
                 if gadget.diff_sp == 0 and gadget.end_type == TYPE_RETURN:
                     candidates_ret.append(gadget)
+                    gadgets.remove(gadget)
+                    continue
+
+                if gadget.end_type != TYPE_RETURN:
+                    if gadget.end_type == TYPE_JMP_REG or gadget.end_type == TYPE_CALL_REG:
+                        depends_regs.update(gadget.depends_regs)
+                        candidates_no_return.append(gadget)
                     gadgets.remove(gadget)
                     continue
 
@@ -100,7 +105,7 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=
 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, not_write_regs)
-    candidates = candidates_defined + candidates_pop + candidates_write + candidates_depends + candidates_ret # ordered by useful gadgets
+    candidates = candidates_defined + candidates_pop + candidates_write + candidates_no_return + candidates_depends + candidates_ret # ordered by useful gadgets
     return candidates
 
 def extract_byte(bv, pos):
@@ -142,18 +147,14 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 continue
             gadget.end_gadget = next_gadget
             gadget.diff_sp += next_gadget.diff_sp - diff
-            solves['rip'] = next_gadget.addr
 
-        if not gadget.regAst:
+        if gadget.regAst == None:
             gadget.buildAst()
         for reg,val in list(solves.items())[:]:
-            if reg != 'rip' and reg not in gadget.written_regs:
+            if reg not in gadget.written_regs:
                 continue
 
-            if reg == 'rip':
-                regAst = gadget.end_ast
-            else:
-                regAst = gadget.regAst[reg]
+            regAst = gadget.regAst[reg]
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
                 tmp_solved[reg] = []
                 solved_reg[reg] = val
@@ -216,9 +217,38 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 solved_reg[reg] = val
                 del solves[reg]
 
-        solves.pop('rip', None) # clear end gadget ast
         if not tmp_solved:
             continue
+
+        if gadget.end_type != TYPE_RETURN:
+            regAst = gadget.end_ast
+            val = gadget.end_gadget.addr
+            hasil = ctx.getModel(regAst == val).values()
+
+            refind_dict = {}
+            for v in hasil:
+                alias = v.getVariable().getAlias()
+                if 'STACK' not in alias:
+                    if alias in regs and alias not in refind_dict:
+                        refind_dict[alias] = v.getValue()
+                    else:
+                        hasil = False
+                        break
+                elif avoid_char: # check if stack is popped contain avoid char
+                    for char in avoid_char:
+                        if char in val.to_bytes(8, 'little'):
+                            hasil = False
+                            refind_dict = False
+                            break
+            if refind_dict:
+                if notFirst:
+                    hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False, avoid_char)
+                else:
+                    hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char)
+                tmp_written_regs.update(kk)
+            if not hasil:
+                continue
+            tmp_solved['rip'] = hasil
 
         tmp_written_regs.update(gadget.written_regs)
         if set.intersection(tmp_written_regs, set(list(solved.keys()))):
@@ -346,6 +376,7 @@ class ChainBuilder(object):
         for gadget in gadgets:
             gadget.regAst = None # AstNode can't be cached
             gadget.memory_write_ast = None # AstNode can't be cached
+            gadget.end_ast = None # AstNode can't be cached
         saved = pickle.dumps(gadgets)
         return saved
 
