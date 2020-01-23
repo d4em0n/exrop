@@ -45,14 +45,17 @@ def findForRet(gadgets, min_diff_sp=0, not_write_regs=set(), avoid_char=None):
             continue
         if set.intersection(not_write_regs, gadget.written_regs):
             continue
-        if not gadget.is_memory_write and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp >= min_diff_sp:
+        if not gadget.is_memory_write and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
             return gadget
+    code.interact(local=locals())
+    print("KK")
 
 def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=None):
     candidates_pop = []
     candidates_write = []
     candidates_depends = []
     candidates_defined = []
+    candidates_ret = [] # always
     depends_regs = set()
     for i in range(len(regs_write), 0, -1):
         reg_combs = combinations(regs_write, i)
@@ -60,6 +63,10 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=
             reg_comb = set(comb)
             for gadget in list(gadgets):
                 if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read:
+                    continue
+
+                if gadget.end_type == TYPE_UNKNOWN:
+                    gadgets.remove(gadget)
                     continue
 
                 badchar = False
@@ -71,6 +78,11 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=
                             break
                 if badchar:
                     continue
+                if gadget.diff_sp == 0 and gadget.end_type == TYPE_RETURN:
+                    candidates_ret.append(gadget)
+                    gadgets.remove(gadget)
+                    continue
+
                 if reg_comb.issubset(set(gadget.defined_regs.keys())):
                     candidates_defined.append(gadget)
                     gadgets.remove(gadget)
@@ -90,7 +102,7 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=
 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, not_write_regs)
-    candidates = candidates_defined + candidates_pop + candidates_write + candidates_depends # ordered by useful gadgets
+    candidates = candidates_defined + candidates_pop + candidates_write + candidates_depends + candidates_ret # ordered by useful gadgets
     return candidates
 
 def extract_byte(bv, pos):
@@ -116,23 +128,21 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
     reglist = []
     written_regs_by_gadget = []
     for gadget in candidates:
-
         tmp_solved = dict()
         tmp_written_regs = set()
         intersect = False
-
         if gadget.end_type != TYPE_RETURN and not gadget.end_gadget:
             next_gadget = None
 #            print("handling no return gadget")
             diff = 0
             if gadget.end_type == TYPE_JMP_REG:
-                next_gadget = findForRet(gadgets, 0, set(list(solved.keys())), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 0, set(list(solved.keys())), avoid_char=avoid_char)
             elif gadget.end_type == TYPE_CALL_REG:
-                next_gadget = findForRet(gadgets, 8, set(list(solved.keys())), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 8, set(list(solved.keys())), avoid_char=avoid_char)
                 diff = 8
             if not next_gadget:
+                print("NOTFOUND")
                 continue
-#            print("Found ret @ 0x{:08x}".format(next_gadget.addr))
             gadget.end_gadget = next_gadget
             gadget.diff_sp += next_gadget.diff_sp - diff
             solves['rip'] = next_gadget.addr
@@ -233,7 +243,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
         if not solves:
             written_regs.update(add_info)
             return final_solved, written_regs
-
+    print(solves)
     return [],[]
 
 def solveWriteGadgets(gadgets, solves, avoid_char=None):
