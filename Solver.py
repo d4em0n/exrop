@@ -47,8 +47,6 @@ def findForRet(gadgets, min_diff_sp=0, not_write_regs=set(), avoid_char=None):
             continue
         if not gadget.is_memory_write and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
             return gadget
-    code.interact(local=locals())
-    print("KK")
 
 def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=None):
     candidates_pop = []
@@ -141,7 +139,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 next_gadget = findForRet(candidates[:], 8, set(list(solved.keys())), avoid_char=avoid_char)
                 diff = 8
             if not next_gadget:
-                print("NOTFOUND")
                 continue
             gadget.end_gadget = next_gadget
             gadget.diff_sp += next_gadget.diff_sp - diff
@@ -243,7 +240,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
         if not solves:
             written_regs.update(add_info)
             return final_solved, written_regs
-    print(solves)
     return [],[]
 
 def solveWriteGadgets(gadgets, solves, avoid_char=None):
