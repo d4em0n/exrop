@@ -281,7 +281,8 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
         if not tmp_solved:
             continue
         for reg in tmp_solved:
-            del solves[reg]
+            if reg != 'rip':
+                del solves[reg]
         solved.update(tmp_solved)
         written_regs.update(tmp_written_regs)
         if not solves:
