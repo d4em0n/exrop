@@ -2,6 +2,7 @@ import code
 import pickle
 from itertools import combinations
 from triton import *
+from Gadget import *
 
 def initialize():
     ctx = TritonContext()
@@ -74,6 +75,7 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=
                     continue
                 if gadget.diff_sp == 0 and gadget.end_type == TYPE_RETURN:
                     candidates_ret.append(gadget)
+                    depends_regs.update(gadget.depends_regs)
                     gadgets.remove(gadget)
                     continue
 
