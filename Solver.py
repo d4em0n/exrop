@@ -122,6 +122,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
     final_solved = []
     solved_reg = dict()
     candidates = findCandidatesGadgets(gadgets, solves.keys(), avoid_char=avoid_char)
+    first_solves = solves.copy()
     spi = 0
     written_regs = set()
     refind_solves = dict()
@@ -135,13 +136,15 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
         tmp_written_regs = set()
         intersect = False
         if gadget.end_type != TYPE_RETURN and not gadget.end_gadget:
+            if set.intersection(set(list(solves.keys())), gadget.end_reg_used):
+                continue
             next_gadget = None
 #            print("handling no return gadget")
             diff = 0
             if gadget.end_type == TYPE_JMP_REG:
-                next_gadget = findForRet(candidates[:], 0, set(list(solved.keys())), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 0, set(list(first_solves.keys())), avoid_char=avoid_char)
             elif gadget.end_type == TYPE_CALL_REG:
-                next_gadget = findForRet(candidates[:], 8, set(list(solved.keys())), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 8, set(list(first_solves.keys())), avoid_char=avoid_char)
                 diff = 8
             if not next_gadget:
                 continue
