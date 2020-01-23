@@ -99,13 +99,11 @@ bss = libc.bss()
 
 rop = Exrop(binname)
 rop.find_gadgets(cache=True)
-#print("func-call gadgets 0x41414141(0x20, 0x30, \"Hello\")")
-#chain = rop.func_call(0x41414141, (0x20, 0x30, "Hello"), 0x7fffff00)
 print("open('/etc/passwd', 0)")
 chain = rop.func_call(open, ("/etc/passwd", 0), bss)
 chain.dump()
-print("read(2, bss, 0x100)")
-chain = rop.func_call(read, (2, bss, 0x100))
+print("read('rax', bss, 0x100)") # register can be used as argument too!
+chain = rop.func_call(read, ('rax', bss, 0x100))
 chain.dump()
 print("write(1, bss, 0x100)")
 chain = rop.func_call(write, (1, bss, 0x100))
@@ -116,28 +114,55 @@ Output:
 ```
 open('/etc/passwd', 0)
 $RSP+0x0000 : 0x000000000002155f # pop rdi; ret
-$RSP+0x0008 : 0x00000000003ec860
-$RSP+0x0010 : 0x0000000000155fc6 # pop r8; mov eax, 1; ret
-$RSP+0x0018 : 0x7361702f6374652f
-$RSP+0x0020 : 0x0000000000044359 # mov qword ptr [rdi], r8; ret
-$RSP+0x0028 : 0x000000000002155f # pop rdi; ret
-$RSP+0x0030 : 0x00000000003ec868
-$RSP+0x0038 : 0x0000000000155fc6 # pop r8; mov eax, 1; ret
-$RSP+0x0040 : 0x0000000000647773
-$RSP+0x0048 : 0x0000000000044359 # mov qword ptr [rdi], r8; ret
-$RSP+0x0050 : 0x000000000002155f # pop rdi; ret
-$RSP+0x0058 : 0x00000000003ec860
-$RSP+0x0060 : 0x0000000000023e6a # pop rsi; ret
-$RSP+0x0068 : 0x0000000000000000
-$RSP+0x0070 : 0x000000000010fc40
+$RSP+0x0008 : 0x7361702f6374652f
+$RSP+0x0010 : 0x0000000000021558 # pop r12; pop r13; pop r14; pop r15; ret
+$RSP+0x0018 : 0x0000000000000000
+$RSP+0x0020 : 0x00000000003ec860
+$RSP+0x0028 : 0x0000000000000000
+$RSP+0x0030 : 0x0000000000000000
+$RSP+0x0038 : 0x0000000000103cc9 # pop rdx; pop rcx; pop rbx; ret
+$RSP+0x0040 : 0x0000000000000000
+$RSP+0x0048 : 0x0000000000000000
+$RSP+0x0050 : 0x0000000000155fc7
+$RSP+0x0058 : 0x0000000000022b8a # mov r9, r13; call rbx: next -> (0x00155fc7) # pop rax; mov eax, 1; ret
+$RSP+0x0060 : 0x00000000001411c7 # mov qword ptr [r9], rdi; ret
+$RSP+0x0068 : 0x000000000002155f # pop rdi; ret
+$RSP+0x0070 : 0x0000000000647773
+$RSP+0x0078 : 0x0000000000021558 # pop r12; pop r13; pop r14; pop r15; ret
+$RSP+0x0080 : 0x0000000000000000
+$RSP+0x0088 : 0x00000000003ec868
+$RSP+0x0090 : 0x0000000000000000
+$RSP+0x0098 : 0x0000000000000000
+$RSP+0x00a0 : 0x0000000000103cc9 # pop rdx; pop rcx; pop rbx; ret
+$RSP+0x00a8 : 0x0000000000000000
+$RSP+0x00b0 : 0x0000000000000000
+$RSP+0x00b8 : 0x0000000000155fc7
+$RSP+0x00c0 : 0x0000000000022b8a # mov r9, r13; call rbx: next -> (0x00155fc7) # pop rax; mov eax, 1; ret
+$RSP+0x00c8 : 0x00000000001411c7 # mov qword ptr [r9], rdi; ret
+$RSP+0x00d0 : 0x000000000002155f # pop rdi; ret
+$RSP+0x00d8 : 0x00000000003ec860
+$RSP+0x00e0 : 0x0000000000023e6a # pop rsi; ret
+$RSP+0x00e8 : 0x0000000000000000
+$RSP+0x00f0 : 0x000000000010fc40
 
-read(2, bss, 0x100)
-$RSP+0x0000 : 0x00000000001306d9 # pop rdx; pop rsi; ret
-$RSP+0x0008 : 0x0000000000000100
-$RSP+0x0010 : 0x00000000003ec860
-$RSP+0x0018 : 0x000000000002155f # pop rdi; ret
-$RSP+0x0020 : 0x0000000000000002
-$RSP+0x0028 : 0x0000000000110070
+read('rax', bss, 0x100)
+$RSP+0x0000 : 0x0000000000021558 # pop r12; pop r13; pop r14; pop r15; ret
+$RSP+0x0008 : 0x0000000000155fc7
+$RSP+0x0010 : 0x0000000000000000
+$RSP+0x0018 : 0x0000000000000000
+$RSP+0x0020 : 0x0000000000000000
+$RSP+0x0028 : 0x0000000000106899 # mov r8, rax; call r12: next -> (0x00155fc7) # pop rax; mov eax, 1; ret
+$RSP+0x0030 : 0x000000000011c659 # mov rax, rbx; pop rdx; pop rbx; ret
+$RSP+0x0038 : 0x0000000000000000
+$RSP+0x0040 : 0x0000000000155fc7
+$RSP+0x0048 : 0x000000000011c659 # mov rax, rbx; pop rdx; pop rbx; ret
+$RSP+0x0050 : 0x0000000000000000
+$RSP+0x0058 : 0x0000000000000000
+$RSP+0x0060 : 0x000000000009ba08 # mov rdi, r8; call rax: next -> (0x00155fc7) # pop rax; mov eax, 1; ret
+$RSP+0x0068 : 0x00000000001306d9 # pop rdx; pop rsi; ret
+$RSP+0x0070 : 0x0000000000000100
+$RSP+0x0078 : 0x00000000003ec860
+$RSP+0x0080 : 0x0000000000110070
 
 write(1, bss, 0x100)
 $RSP+0x0000 : 0x00000000001306d9 # pop rdx; pop rsi; ret
