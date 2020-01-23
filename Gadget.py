@@ -61,6 +61,7 @@ class Gadget(object):
         self.end_type = TYPE_RETURN # default ret
         self.end_ast = None
         self.end_gadget = 0 # return gadget to fix no-return gadgets
+        self.end_reg_used = set() # register used in end_ast
 
     def __repr__(self):
         append_com = ""
@@ -195,6 +196,7 @@ class Gadget(object):
                 else:
                     type_end = TYPE_UNKNOWN
                 self.end_type = type_end
+                self.end_reg_used = tmp_red
 #                code.interact(local=locals())
                 break
 
@@ -218,12 +220,8 @@ class Gadget(object):
                 self.defined_regs[reg] = str(simplified)
                 continue
             childs = simplified.getChildren()
-            if not childs:
+            if not childs and len(childs) != 2:
                 continue
-            try:
-                assert(len(childs) == 2)
-            except:
-                code.interact(local=locals())
             try:
                 childs[1].getInteger()
             except TypeError:
