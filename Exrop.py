@@ -3,7 +3,8 @@ from RopChain import RopChain
 from os import popen
 
 def parseRopGadget(filename):
-    cmd = 'ROPgadget --binary {} --only "pop|xchg|add|sub|xor|mov|ret|jmp|call" | tail -n +3 | head -n -2'.format(filename)
+    cmd = 'ROPgadget --binary {} --only "pop|xchg|add|sub|xor|mov|ret|jmp|call" | tail -n +3 | head -n -2'.format(filename) # FIXME
+#    cmd = 'ROPgadget --binary {} --only "pop|xchg|xor|mov|ret|jmp|call" | tail -n +3 | head -n -2'.format(filename)
     with popen(cmd) as fp:
         sample_gadgets = dict()
         datas = fp.read().strip().split("\n")
@@ -65,11 +66,12 @@ class Exrop(object):
 
     def func_call(self, func_addr, args, rwaddr=None, convention="sysv"):
         order_reg = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+        regsx86_64 = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
         regs = dict()
         ropchain = RopChain()
         for i in range(len(args)):
             arg = args[i]
-            if isinstance(arg, str):
+            if isinstance(arg, str) and arg not in regsx86_64:
                 assert rwaddr, "Please define read write addr"
                 arg += "\x00"
                 chain = self.set_string({rwaddr:arg})
