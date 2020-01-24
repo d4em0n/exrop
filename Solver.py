@@ -105,7 +105,7 @@ def findCandidatesGadgets(gadgets, regs_write, not_write_regs=set(), avoid_char=
 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, not_write_regs)
-    candidates = candidates_defined + candidates_pop + candidates_write + candidates_no_return + candidates_depends + candidates_ret # ordered by useful gadgets
+    candidates = candidates_pop + candidates_defined + candidates_write + candidates_no_return + candidates_depends + candidates_ret # ordered by useful gadgets
     return candidates
 
 def extract_byte(bv, pos):
@@ -162,7 +162,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
                 tmp_solved[reg] = []
                 solved_reg[reg] = val
-                del solves[reg]
                 continue
 
             refind_dict = {}
