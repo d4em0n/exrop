@@ -186,7 +186,7 @@ class Gadget(object):
             if not pop and inst.isMemoryRead():
                 self.is_memory_read = 1
 
-            if inst.isMemoryWrite() and 'mov' in self.insstr[pc]:
+            if inst.isMemoryWrite() and 'mov' in inst.getDisassembly():
                 for store_access in inst.getStoreAccess():
                     addr_ast = store_access[0].getLeaAst()
                     val_ast = store_access[1]
