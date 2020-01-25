@@ -1,5 +1,4 @@
 from triton import *
-from keystone import *
 import code
 
 STACK = 0x7fffff00
@@ -20,21 +19,6 @@ def symbolizeReg(ctx, regname):
 def getTritonReg(ctx, regname):
     return getattr(ctx.registers, regname)
 
-def asm_per_ins(codes, addr=0):
-    ks = Ks(KS_ARCH_X86, KS_MODE_64)
-    insns = dict()
-    for code in codes:
-        if not code:
-            continue
-        insns[addr] = bytes(ks.asm(code)[0])
-        addr += len(insns[addr])
-    return insns
-
-def asm_ins(code):
-    ks = Ks(KS_ARCH_X86, KS_MODE_64)
-    insns = bytes(ks.asm(code)[0])
-    return insns
-
 TYPE_RETURN = 0
 TYPE_JMP_REG = 1
 TYPE_JMP_MEM = 2
@@ -53,8 +37,8 @@ class Gadget(object):
         self.regAst = dict()
         self.diff_sp = 0 # jarak rsp ke rbp sesaaat sebelum ret
         self.is_analyzed = False
-        self.insstr = dict()
-        self.insns = dict()
+        self.insstr = ""
+        self.insns = b""
         self.is_memory_write = 0
         self.is_memory_read = 0 # not pop
         self.memory_write_ast = []
@@ -67,22 +51,19 @@ class Gadget(object):
         append_com = ""
         if self.end_gadget:
             append_com = ": next -> (0x{:08x}) # {}".format(self.end_gadget.addr, self.end_gadget)
-        return "; ".join(self.insstr.values()) + append_com
+        return self.insstr + append_com
 #        return "addr : {}\nwritten : {}\nread : {}\npopped : {}\ndepends : {}\ndiff_sp: {}".format(self.addr, self.written_regs, self.read_regs, self.popped_regs, self.depends_regs, self.diff_sp)
 
     def __str__(self):
         append_com = ""
         if self.end_gadget:
             append_com = ": next -> (0x{:08x}) # {}".format(self.end_gadget.addr, self.end_gadget)
-        return "; ".join(self.insstr.values()) + append_com
+        return self.insstr + append_com
 #        return "addr : {}\nwritten : {}\nread : {}\npopped : {}\ndepends : {}\ndiff_sp: {}\n".format(self.addr, self.written_regs, self.read_regs, self.popped_regs, self.depends_regs, self.diff_sp)
 
-    def loadFromString(self, instructions):
-        addr = self.addr
-        for ins in instructions.split(";"):
-            self.insstr[addr] = ins.strip()
-            self.insns[addr] = asm_ins(ins)
-            addr += len(self.insns[addr])
+    def loadFromString(self, str_ins, opcodes):
+        self.insstr = str_ins
+        self.insns = opcodes
 
     def buildAst(self):
         ctx = initialize()
@@ -98,17 +79,20 @@ class Gadget(object):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
             tmpb.setAlias("STACK{}".format(i))
 
-        sp = STACK
-        instructions = self.insns
-        pc = self.addr
         self.regAst = dict()
         self.memory_write_ast = []
         BSIZE = 8
+
+        sp = STACK
+        instructions = self.insns
+        pc = 0
+
         while True:
             inst = Instruction()
-            inst.setOpcode(instructions[pc])
+            inst.setOpcode(instructions[pc:pc+16])
             inst.setAddress(pc)
             ctx.processing(inst)
+
             if inst.isControlFlow(): # check if end of gadget
                 type_end = self.end_type
                 if type_end == TYPE_CALL_MEM or type_end == TYPE_JMP_MEM:
@@ -132,7 +116,7 @@ class Gadget(object):
         BSIZE = 8
         ctx = initialize()
         astCtxt = ctx.getAstContext()
-        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"]
 
         reglist = dict()
         for reg in regs:
@@ -146,14 +130,13 @@ class Gadget(object):
 
         sp = STACK
         instructions = self.insns
-        pc = self.addr
+        pc = 0
 
         while True:
             inst = Instruction()
-            inst.setOpcode(instructions[pc])
+            inst.setOpcode(instructions[pc:pc+16])
             inst.setAddress(pc)
             ctx.processing(inst)
-
 
             written = inst.getWrittenRegisters()
             red = inst.getReadRegisters()

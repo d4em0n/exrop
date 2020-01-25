@@ -3,15 +3,17 @@ from RopChain import RopChain
 from os import popen
 
 def parseRopGadget(filename):
-    cmd = 'ROPgadget --binary {} --only "pop|xchg|add|sub|xor|mov|ret|jmp|call" | tail -n +3 | head -n -2'.format(filename)
+    cmd = 'ROPgadget --binary {} --only "pop|xchg|add|sub|xor|mov|ret|jmp|call" --dump | tail -n +3 | head -n -2'.format(filename)
     with popen(cmd) as fp:
         sample_gadgets = dict()
         datas = fp.read().strip().split("\n")
         datas.sort(key=len) # sort by length
         for data in datas:
             addr,insns = data.split(" : ")
+            insstr,opcode_hex = insns.split(" // ")
+            opcode = bytes.fromhex(opcode_hex)
             addr = int(addr, 16)
-            sample_gadgets[addr] = insns
+            sample_gadgets[addr] = (insstr,opcode)
         return sample_gadgets
 
 class Exrop(object):

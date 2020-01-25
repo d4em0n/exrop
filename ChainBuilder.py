@@ -28,17 +28,17 @@ class ChainBuilder(object):
             last_gadget[1].append(next_call)
         return rop_chain
 
-    def add_gadget_string(self, addr, gadget_string):
+    def add_gadget_string(self, addr, gadget_string, gadget_opcode):
         gadget = Gadget(addr)
-        gadget.loadFromString(gadget_string)
+        gadget.loadFromString(gadget_string, gadget_opcode)
         self.add_gadget(gadget)
 
     def add_gadget(self, gadget):
         self.gadgets.append(gadget)
 
     def load_list_gadget_string(self, gadgets_dict):
-        for addr,gadget_string in gadgets_dict.items():
-            self.add_gadget_string(addr, gadget_string)
+        for addr,info in gadgets_dict.items():
+            self.add_gadget_string(addr, info[0], info[1])
 
     def analyzeAll(self):
         for gadget in self.gadgets:
