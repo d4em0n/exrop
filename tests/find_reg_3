@@ -1,0 +1,11 @@
+{
+    "gadgets": {
+        0x1000: 'add eax, 0x5d000000 ; pop r12 ; ret',
+        0x2000: 'mov r8, rax ; call r12',
+        0x3000: 'mov rax, rbx ; pop rbx ; ret',
+        0x4000: 'pop r12; pop r13; pop r15; ret',
+    },
+    "find": {
+        "r8": "rax",
+    }
+}
