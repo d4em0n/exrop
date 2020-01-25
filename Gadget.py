@@ -100,7 +100,6 @@ class Gadget(object):
         for reg in regs:
             symbolizeReg(ctx, reg)
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
-        ctx.setConcreteRegisterValue(ctx.registers.rbp, STACK+8*64)
 
         for i in range(MAX_FILL_STACK):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))

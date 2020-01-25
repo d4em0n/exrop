@@ -3,7 +3,7 @@ from RopChain import RopChain
 from os import popen
 
 def parseRopGadget(filename):
-    cmd = 'ROPgadget --binary {} --only "pop|xchg|add|sub|xor|mov|ret|jmp|call" --dump | tail -n +3 | head -n -2'.format(filename)
+    cmd = 'ROPgadget --binary {} --only "pop|xchg|add|sub|xor|mov|ret|jmp|call|leave" --dump | tail -n +3 | head -n -2'.format(filename)
     with popen(cmd) as fp:
         sample_gadgets = dict()
         datas = fp.read().strip().split("\n")
