@@ -26,6 +26,28 @@ TYPE_CALL_REG = 3
 TYPE_CALL_MEM = 4
 TYPE_UNKNOWN = 5
 
+def regx86_64(reg):
+    regs = {
+        'rax': ['al', 'ah', 'ax', 'eax', 'rax'],
+        'rbx': ['bl', 'bh', 'bx', 'ebx', 'rbx'],
+        'rcx': ['cl', 'ch', 'cx', 'ecx', 'rcx'],
+        'rdx': ['dl', 'dh', 'dx', 'edx', 'rdx'],
+        'rdi': ['dil', 'di', 'edi', 'rdi'],
+        'rsi': ['sil', 'si', 'esi', 'rsi'],
+        'r8': ['r8b', 'r8w', 'r8d', 'r8'],
+        'r9': ['r9b', 'r9w', 'r9d', 'r9'],
+        'r10': ['r10b', 'r10w', 'r10d', 'r10'],
+        'r11': ['r11b', 'r11w', 'r11d', 'r11'],
+        'r12': ['r12b', 'r12w', 'r12d', 'r12'],
+        'r13': ['r13b', 'r13w', 'r13d', 'r13'],
+        'r14': ['r14b', 'r14w', 'r14d', 'r14'],
+        'r15': ['r15b', 'r15w', 'r15d', 'r15'],
+    }
+    for r in regs:
+        if reg in regs[r]:
+            return r
+    return False
+
 class Gadget(object):
     def __init__(self, addr):
         self.addr = addr
@@ -143,8 +165,8 @@ class Gadget(object):
             pop = False
             tmp_red = set()
             for wrt in written:
-                regname = wrt[0].getName()
-                if regname in regs:
+                regname = regx86_64(wrt[0].getName())
+                if regname:
                     self.written_regs.add(regname)
                     newsp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
                     if (newsp - sp) == 8:
@@ -152,8 +174,8 @@ class Gadget(object):
                         self.popped_regs.add(regname)
 
             for r in red:
-                regname = r[0].getName()
-                if regname in regs:
+                regname = regx86_64(r[0].getName())
+                if regname:
                     tmp_red.add(regname)
                     self.read_regs.add(regname)
 
