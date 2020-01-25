@@ -7,7 +7,6 @@ def parseRopGadget(filename):
     with popen(cmd) as fp:
         sample_gadgets = dict()
         datas = fp.read().strip().split("\n")
-        datas.sort(key=len) # sort by length
         for data in datas:
             addr,insns = data.split(" : ")
             insstr,opcode_hex = insns.split(" // ")
