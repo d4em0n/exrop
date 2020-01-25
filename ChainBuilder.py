@@ -20,6 +20,9 @@ class ChainBuilder(object):
     def solve_chain_write(self):
         self.raw_chain = solveWriteGadgets(self.gadgets.copy(), self.writes)
 
+    def solve_pivot(self, addr):
+        self.raw_chain = solvePivot(self.gadgets.copy(), addr)
+
     def build_chain(self, next_call=None):
         rop_chain = RopChain()
         self.build_chain_recurse(self.raw_chain, rop_chain)
@@ -67,6 +70,7 @@ class ChainBuilder(object):
             gadget.regAst = None # AstNode can't be cached
             gadget.memory_write_ast = None # AstNode can't be cached
             gadget.end_ast = None # AstNode can't be cached
+            gadget.pivot_ast = None # AstNode can't be cached
         saved = pickle.dumps(gadgets)
         return saved
 

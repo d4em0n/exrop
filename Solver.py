@@ -47,6 +47,22 @@ def findForRet(gadgets, min_diff_sp=0, not_write_regs=set(), avoid_char=None):
         if not gadget.is_memory_write and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
             return gadget
 
+def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
+    for gadget in list(gadgets):
+        badchar = False
+        if avoid_char:
+            for char in avoid_char:
+                addrb = gadget.addr.to_bytes(8, 'little')
+                if char in addrb:
+                    badchar = True
+                    break
+        if badchar:
+            continue
+        if set.intersection(not_write_regs, gadget.written_regs):
+            continue
+        if gadget.pivot:
+            return gadget
+
 def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(), avoid_char=None):
     candidates_pop = []
     candidates_write = []
@@ -112,7 +128,7 @@ def filter_byte(astctxt, bv, bc, bsize):
     return nbv
 
 def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=None, keep_regs=set()):
-    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     final_solved = []
     solved_reg = dict()
     candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs)
@@ -327,3 +343,31 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
                     final_solved.append((gadget, tmp_solved.values()))
                     if not solves:
                         return final_solved
+
+def solvePivot(gadgets, addr_pivot, avoid_char=None):
+    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+    final_solved = []
+    gadget = findPivot(gadgets, avoid_char=avoid_char)
+    ctx = initialize()
+    hasil = ctx.getModel(gadget.pivot_ast == addr_pivot).values()
+    final_solved = []
+    tmp_solved = dict()
+    for v in hasil:
+        alias = v.getVariable().getAlias()
+        refind_dict = dict()
+        if 'STACK' not in alias:
+            if alias in regs and alias not in refind_dict:
+                refind_dict[alias] = v.getValue()
+            else:
+                hasil = False
+                break
+        else:
+            idxchain = int(alias.replace("STACK", ""))
+            new_diff_sp = (idxchain+1)*8
+    if hasil and refind_dict:
+        hasil,_ = solveGadgets(gadgets[:], refind_dict)
+        new_diff_sp = 0
+    gadget.diff_sp = new_diff_sp
+    tmp_solved[addr_pivot] = hasil
+    final_solved.append((gadget, tmp_solved.values()))
+    return final_solved

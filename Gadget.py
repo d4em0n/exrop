@@ -34,6 +34,7 @@ def regx86_64(reg):
         'rdx': ['dl', 'dh', 'dx', 'edx', 'rdx'],
         'rdi': ['dil', 'di', 'edi', 'rdi'],
         'rsi': ['sil', 'si', 'esi', 'rsi'],
+        'rbp': ['bp', 'ebp', 'rbp'],
         'r8': ['r8b', 'r8w', 'r8d', 'r8'],
         'r9': ['r9b', 'r9w', 'r9d', 'r9'],
         'r10': ['r10b', 'r10w', 'r10d', 'r10'],
@@ -70,6 +71,8 @@ class Gadget(object):
         self.end_ast = None
         self.end_gadget = 0 # return gadget to fix no-return gadgets
         self.end_reg_used = set() # register used in end_ast
+        self.pivot = 0
+        self.pivot_ast = None
 
     def __repr__(self):
         append_com = ""
@@ -92,7 +95,7 @@ class Gadget(object):
     def buildAst(self):
         ctx = initialize()
         astCtxt = ctx.getAstContext()
-        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"]
 
         for reg in regs:
             symbolizeReg(ctx, reg)
@@ -133,6 +136,9 @@ class Gadget(object):
                     val_ast = store_access[1]
                     self.memory_write_ast.append((addr_ast, val_ast))
 
+        if ctx.isRegisterSymbolized(ctx.registers.rsp):
+            self.pivot = 1
+            self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
         for reg in self.written_regs:
             self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
 
@@ -140,13 +146,12 @@ class Gadget(object):
         BSIZE = 8
         ctx = initialize()
         astCtxt = ctx.getAstContext()
-        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"]
+        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"]
 
         reglist = dict()
         for reg in regs:
             reglist[reg] = symbolizeReg(ctx, reg)
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
-        ctx.setConcreteRegisterValue(ctx.registers.rbp, STACK+8*64)
 
         for i in range(MAX_FILL_STACK):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
@@ -219,6 +224,10 @@ class Gadget(object):
 
             pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
             sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
+
+        if ctx.isRegisterSymbolized(ctx.registers.rsp):
+            self.pivot = 1
+            self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
