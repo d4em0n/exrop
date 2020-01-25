@@ -371,7 +371,7 @@ def solvePivot(gadgets, addr_pivot, avoid_char=None):
                 new_diff_sp = (idxchain+1)*8
         if hasil and refind_dict:
             hasil,_ = solveGadgets(gadgets[:], refind_dict)
-            new_diff_sp = 8
+            new_diff_sp = 0
         if not hasil:
             continue
         gadget.diff_sp = new_diff_sp
