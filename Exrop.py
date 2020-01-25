@@ -43,7 +43,7 @@ class Exrop(object):
         pass
 
     def stack_pivot(self, addr, avoid_char=None):
-        self.chain_builder.solve_pivot(addr)
+        self.chain_builder.solve_pivot(addr, avoid_char)
         ropchain = self.chain_builder.build_chain()
         return ropchain
 

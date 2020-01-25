@@ -20,8 +20,8 @@ class ChainBuilder(object):
     def solve_chain_write(self):
         self.raw_chain = solveWriteGadgets(self.gadgets.copy(), self.writes)
 
-    def solve_pivot(self, addr):
-        self.raw_chain = solvePivot(self.gadgets.copy(), addr)
+    def solve_pivot(self, addr, avoid_char):
+        self.raw_chain = solvePivot(self.gadgets.copy(), addr, avoid_char)
 
     def build_chain(self, next_call=None):
         rop_chain = RopChain()

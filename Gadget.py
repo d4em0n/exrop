@@ -136,7 +136,7 @@ class Gadget(object):
                     self.memory_write_ast.append((addr_ast, val_ast))
 
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
-            self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
+            self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst() - 8
             if self.pivot_ast:
                 self.pivot = 1
 
@@ -227,7 +227,7 @@ class Gadget(object):
             sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
 
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
-            self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
+            self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst() - 8
             if self.pivot_ast:
                 self.pivot = 1
 
