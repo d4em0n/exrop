@@ -211,7 +211,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
         if not tmp_solved:
             continue
 
-        if gadget.end_type != TYPE_RETURN and not gadget.end_gadget:
+        if gadget.end_type != TYPE_RETURN:
             if set.intersection(set(list(solves.keys())), gadget.end_reg_used):
                 continue
             next_gadget = None
