@@ -141,7 +141,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 
         reg_to_reg_solve = set()
         for reg,val in list(solves.items())[:]:
-            if reg not in gadget.written_regs or val in gadget.end_reg_used:
+            if reg not in gadget.written_regs or val in gadget.end_reg_used or reg in gadget.end_reg_used:
                 continue
 
             regAst = gadget.regAst[reg]
