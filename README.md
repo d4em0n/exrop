@@ -130,17 +130,19 @@ $RSP+0x0020 : 0x0000000000022b8a # mov r9, r13 ; call rbx: next -> (0x0002155f) 
 $RSP+0x0028 : 0x000000000002155f # pop rdi ; ret
 $RSP+0x0030 : 0x7361702f6374652f
 $RSP+0x0038 : 0x00000000001411c7 # mov qword ptr [r9], rdi ; ret
-$RSP+0x0040 : 0x000000000002155f # pop rdi ; ret
-$RSP+0x0048 : 0x0000000000647773
-$RSP+0x0050 : 0x0000000000021a45 # pop r13 ; ret
-$RSP+0x0058 : 0x00000000003ec868
+$RSP+0x0040 : 0x0000000000021a45 # pop r13 ; ret
+$RSP+0x0048 : 0x00000000003ec868
+$RSP+0x0050 : 0x00000000001240a4 # sub al, 0 ; pop rbx ; ret
+$RSP+0x0058 : 0x000000000002155f
 $RSP+0x0060 : 0x0000000000022b8a # mov r9, r13 ; call rbx: next -> (0x0002155f) # pop rdi ; ret
-$RSP+0x0068 : 0x00000000001411c7 # mov qword ptr [r9], rdi ; ret
-$RSP+0x0070 : 0x000000000002155f # pop rdi ; ret
-$RSP+0x0078 : 0x00000000003ec860
-$RSP+0x0080 : 0x0000000000023e6a # pop rsi ; ret
-$RSP+0x0088 : 0x0000000000000000
-$RSP+0x0090 : 0x000000000010fc40
+$RSP+0x0068 : 0x000000000002155f # pop rdi ; ret
+$RSP+0x0070 : 0x0000000000647773
+$RSP+0x0078 : 0x00000000001411c7 # mov qword ptr [r9], rdi ; ret
+$RSP+0x0080 : 0x000000000002155f # pop rdi ; ret
+$RSP+0x0088 : 0x00000000003ec860
+$RSP+0x0090 : 0x0000000000023e6a # pop rsi ; ret
+$RSP+0x0098 : 0x0000000000000000
+$RSP+0x00a0 : 0x000000000010fc40
 
 read('rax', bss, 0x100)
 $RSP+0x0000 : 0x0000000000103cc9 # pop rdx ; pop rcx ; pop rbx ; ret
