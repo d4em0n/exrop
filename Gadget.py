@@ -43,6 +43,8 @@ def regx86_64(reg):
         'r14': ['r14b', 'r14w', 'r14d', 'r14'],
         'r15': ['r15b', 'r15w', 'r15d', 'r15'],
     }
+    if reg in regs:
+        return reg
     for r in regs:
         if reg in regs[r]:
             return r
