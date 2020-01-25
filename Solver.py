@@ -143,9 +143,9 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 #            print("handling no return gadget")
             diff = 0
             if gadget.end_type == TYPE_JMP_REG:
-                next_gadget = findForRet(candidates[:], 0, set(list(first_solves.keys())), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 0, avoid_char=avoid_char)
             elif gadget.end_type == TYPE_CALL_REG:
-                next_gadget = findForRet(candidates[:], 8, set(list(first_solves.keys())), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 8, avoid_char=avoid_char)
                 diff = 8
             if not next_gadget:
                 continue
