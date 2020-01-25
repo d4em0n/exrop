@@ -252,6 +252,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 else:
                     hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char, keep_regs=reg_to_reg_solve)
                 tmp_written_regs.update(kk)
+                tmp_written_regs.update(next_gadget.written_regs)
             if not hasil:
                 continue
             tmp_solved['rip'] = hasil
