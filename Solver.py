@@ -53,7 +53,6 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
     candidates_depends = []
     candidates_defined = []
     candidates_defined2 = []
-    candidates_ret = [] # always
     candidates_no_return = []
     depends_regs = set()
     for gadget in list(gadgets):
@@ -69,11 +68,6 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
                     badchar = True
                     break
         if badchar:
-            continue
-        if gadget.diff_sp == 0 and gadget.end_type == TYPE_RETURN:
-            candidates_ret.append(gadget)
-            depends_regs.update(gadget.depends_regs)
-            gadgets.remove(gadget)
             continue
 
         if gadget.end_type != TYPE_RETURN:
@@ -105,7 +99,7 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, set(), not_write_regs)
-    candidates = candidates_defined2 + candidates_defined + candidates_pop + candidates_write + candidates_no_return + candidates_depends + candidates_ret # ordered by useful gadgets
+    candidates = candidates_defined2 + candidates_defined + candidates_pop + candidates_write + candidates_no_return + candidates_depends # ordered by useful gadgets
     return candidates
 
 def extract_byte(bv, pos):
