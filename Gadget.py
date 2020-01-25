@@ -137,8 +137,10 @@ class Gadget(object):
                     self.memory_write_ast.append((addr_ast, val_ast))
 
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
-            self.pivot = 1
             self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
+            if self.pivot_ast:
+                self.pivot = 1
+
         for reg in self.written_regs:
             self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
 
@@ -226,8 +228,9 @@ class Gadget(object):
             sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
 
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
-            self.pivot = 1
             self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
+            if self.pivot_ast:
+                self.pivot = 1
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()

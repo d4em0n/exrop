@@ -48,6 +48,7 @@ def findForRet(gadgets, min_diff_sp=0, not_write_regs=set(), avoid_char=None):
             return gadget
 
 def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
+    candidates = []
     for gadget in list(gadgets):
         badchar = False
         if avoid_char:
@@ -61,7 +62,8 @@ def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
         if set.intersection(not_write_regs, gadget.written_regs):
             continue
         if gadget.pivot:
-            return gadget
+            candidates.append(gadget)
+    return candidates
 
 def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(), avoid_char=None):
     candidates_pop = []
@@ -347,27 +349,32 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
 def solvePivot(gadgets, addr_pivot, avoid_char=None):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     final_solved = []
-    gadget = findPivot(gadgets, avoid_char=avoid_char)
+    candidates = findPivot(gadgets, avoid_char=avoid_char)
     ctx = initialize()
-    hasil = ctx.getModel(gadget.pivot_ast == addr_pivot).values()
     final_solved = []
     tmp_solved = dict()
-    for v in hasil:
-        alias = v.getVariable().getAlias()
-        refind_dict = dict()
-        if 'STACK' not in alias:
-            if alias in regs and alias not in refind_dict:
-                refind_dict[alias] = v.getValue()
+    for gadget in candidates:
+        if not gadget.pivot_ast:
+            gadget.buildAst()
+        hasil = ctx.getModel(gadget.pivot_ast == addr_pivot).values()
+        for v in hasil:
+            alias = v.getVariable().getAlias()
+            refind_dict = dict()
+            if 'STACK' not in alias:
+                if alias in regs and alias not in refind_dict:
+                    refind_dict[alias] = v.getValue()
+                else:
+                    hasil = False
+                    break
             else:
-                hasil = False
-                break
-        else:
-            idxchain = int(alias.replace("STACK", ""))
-            new_diff_sp = (idxchain+1)*8
-    if hasil and refind_dict:
-        hasil,_ = solveGadgets(gadgets[:], refind_dict)
-        new_diff_sp = 0
-    gadget.diff_sp = new_diff_sp
-    tmp_solved[addr_pivot] = hasil
-    final_solved.append((gadget, tmp_solved.values()))
-    return final_solved
+                idxchain = int(alias.replace("STACK", ""))
+                new_diff_sp = (idxchain+1)*8
+        if hasil and refind_dict:
+            hasil,_ = solveGadgets(gadgets[:], refind_dict)
+            new_diff_sp = 8
+        if not hasil:
+            continue
+        gadget.diff_sp = new_diff_sp
+        tmp_solved[addr_pivot] = hasil
+        final_solved.append((gadget, tmp_solved.values()))
+        return final_solved

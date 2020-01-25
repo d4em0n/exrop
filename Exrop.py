@@ -42,6 +42,11 @@ class Exrop(object):
     def load_raw_gadgets(self, gadgets):
         pass
 
+    def stack_pivot(self, addr, avoid_char=None):
+        self.chain_builder.solve_pivot(addr)
+        ropchain = self.chain_builder.build_chain()
+        return ropchain
+
     def set_regs(self, regs, next_call=None, avoid_char=None):
         self.chain_builder.set_regs(regs)
         self.chain_builder.solve_chain(avoid_char)
