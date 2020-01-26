@@ -28,11 +28,10 @@ def test_write(data_test):
     chain_builder.solve_chain_write(avoid_char=avoid_char)
 
 def test_pivot(data_test):
-    chain_builder.set_pivot(data_test['find'])
     avoid_char = None
     if 'badchars' in data_test:
         avoid_char = data_test['badchars']
-    chain_builder.solve_pivot(avoid_char=avoid_char)
+    chain_builder.solve_pivot(data_test['find'], avoid_char=avoid_char)
 
 with open(sys.argv[1], "rb") as fp:
     data_test = eval(fp.read())

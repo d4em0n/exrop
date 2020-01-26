@@ -1,9 +1,8 @@
 {
+    "type": "pivot",
     "gadgets": {
         0x4000: 'leave; ret',
         0x5000: 'pop rbp; ret',
     },
-    "find": {
-        "rsp": 0x41414242,
-    }
+    "find": 0x41414242
 }
