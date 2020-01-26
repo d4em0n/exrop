@@ -165,8 +165,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 continue
 
             refind_dict = {}
-            if not isinstance(val, str):
-                val = astCtxt.bv(val, 64)
             if isinstance(val, str): # probably registers
                 if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg], str):
                     refind_dict[gadget.defined_regs[reg]] = val
@@ -187,22 +185,23 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             fb = filter_byte(astCtxt, child, char, lval)
                             filterbyte.extend(fb)
                     if filterbyte:
-                        filterbyte.append(regAst == val)
+                        filterbyte.append(regAst == astCtxt.bv(val,64))
                         filterbyte = astCtxt.land(filterbyte)
                         hasil = ctx.getModel(filterbyte).values()
                     if not hasil: # try to find again
-                        hasil = ctx.getModel(regAst == val).values()
+                        hasil = ctx.getModel(regAst == astCtxt.bv(val,64)).values()
 
                 else:
-                    hasil = ctx.getModel(regAst == val).values()
+                    hasil = ctx.getModel(regAst == astCtxt.bv(val,64)).values()
 
             for v in hasil:
                 alias = v.getVariable().getAlias()
                 if 'STACK' not in alias:
                     if alias in regs and alias not in refind_dict:
-                        if alias != reg and v.getValue() != val:
+                        if alias != reg or v.getValue() != val:
                             refind_dict[alias] = v.getValue()
                         else:
+                            code.interact(local=locals())
                             hasil = False
                             refind_dict = {}
                             break
