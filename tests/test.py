@@ -13,6 +13,27 @@ if len(sys.argv) == 1:
     print("use: {} test_file".format(sys.argv[0]))
     sys.exit(1)
 
+def test_reg(data_test):
+    chain_builder.set_regs(data_test['find'])
+    avoid_char = None
+    if 'badchars' in data_test:
+        avoid_char = data_test['badchars']
+    chain_builder.solve_chain(avoid_char=avoid_char)
+
+def test_write(data_test):
+    chain_builder.set_writes(data_test['find'])
+    avoid_char = None
+    if 'badchars' in data_test:
+        avoid_char = data_test['badchars']
+    chain_builder.solve_chain_write(avoid_char=avoid_char)
+
+def test_pivot(data_test):
+    chain_builder.set_pivot(data_test['find'])
+    avoid_char = None
+    if 'badchars' in data_test:
+        avoid_char = data_test['badchars']
+    chain_builder.solve_pivot(avoid_char=avoid_char)
+
 with open(sys.argv[1], "rb") as fp:
     data_test = eval(fp.read())
     gadgets = data_test['gadgets']
@@ -21,10 +42,13 @@ with open(sys.argv[1], "rb") as fp:
     chain_builder = ChainBuilder()
     chain_builder.load_list_gadget_string(gadgets)
     chain_builder.analyzeAll()
-    chain_builder.set_regs(data_test['find'])
-    avoid_char = None
-    if 'badchars' in data_test:
-        avoid_char = data_test['badchars']
-    chain_builder.solve_chain(avoid_char=avoid_char)
+
+    if "type" not in data_test or data_test['type'] == 'reg':
+        test_reg(data_test)
+    elif data_test['type'] == 'write_mem':
+        test_write(data_test)
+    elif data_test['type'] == 'pivot':
+        test_pivot(data_test)
+
     build_chain = chain_builder.build_chain()
     build_chain.dump()
