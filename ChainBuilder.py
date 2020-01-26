@@ -17,8 +17,8 @@ class ChainBuilder(object):
     def set_writes(self, writes):
         self.writes = writes
 
-    def solve_chain_write(self):
-        self.raw_chain = solveWriteGadgets(self.gadgets.copy(), self.writes)
+    def solve_chain_write(self, avoid_char=None):
+        self.raw_chain = solveWriteGadgets(self.gadgets.copy(), self.writes, avoid_char=avoid_char)
 
     def solve_pivot(self, addr, avoid_char):
         self.raw_chain = solvePivot(self.gadgets.copy(), addr, avoid_char)
