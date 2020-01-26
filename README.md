@@ -12,6 +12,7 @@ Features:
 - function call (`open('/etc/passwd',0)`)
 - pass register in function call (`read('rax', bss, 0x100)`)
 - avoiding badchars is experimental (need more tests, see [tests/](./tests))
+- stack pivoting (Exrop.pivot)
 ``` python
 from Exrop import Exrop
 
