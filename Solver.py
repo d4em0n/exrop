@@ -201,7 +201,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                         if alias != reg or v.getValue() != val:
                             refind_dict[alias] = v.getValue()
                         else:
-                            code.interact(local=locals())
                             hasil = False
                             refind_dict = {}
                             break

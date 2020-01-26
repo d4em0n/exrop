@@ -129,7 +129,7 @@ class Gadget(object):
                 break
             pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
             sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
-            if inst.isMemoryWrite():
+            if inst.isMemoryWrite() and self.is_memory_write:
                 for store_access in inst.getStoreAccess():
                     addr_ast = store_access[0].getLeaAst()
                     val_ast = store_access[1]
