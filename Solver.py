@@ -165,6 +165,8 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 continue
 
             refind_dict = {}
+            if not isinstance(val, str):
+                val = astCtxt.bv(val, 64)
             if isinstance(val, str): # probably registers
                 if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg], str):
                     refind_dict[gadget.defined_regs[reg]] = val
@@ -198,7 +200,12 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 alias = v.getVariable().getAlias()
                 if 'STACK' not in alias:
                     if alias in regs and alias not in refind_dict:
-                        refind_dict[alias] = v.getValue()
+                        if alias != reg and v.getValue() != val:
+                            refind_dict[alias] = v.getValue()
+                        else:
+                            hasil = False
+                            refind_dict = {}
+                            break
                     else:
                         hasil = False
                         break
@@ -209,7 +216,6 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             refind_dict = False
                             break
             if refind_dict:
-#                print((gadget, refind_dict))
                 if notFirst:
                     hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False, avoid_char)
                 else:
