@@ -117,7 +117,7 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, set(), not_write_regs)
-    candidates = candidates_defined2 + candidates_defined + candidates_pop + candidates_write + candidates_no_return + candidates_depends # ordered by useful gadgets
+    candidates = candidates_defined2 + candidates_pop + candidates_defined + candidates_write + candidates_no_return + candidates_depends # ordered by useful gadgets
     return candidates
 
 def extract_byte(bv, pos):
