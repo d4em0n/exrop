@@ -117,13 +117,16 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
             depends_regs.update(gadget.depends_regs)
             continue
 
+    if depends_regs:
+        candidates_depends = findCandidatesGadgets(gadgets, depends_regs, set(), not_write_regs)
+    candidates = candidates_defined2 + candidates_pop + candidates_defined + candidates_write + candidates_no_return + candidates_depends  # ordered by useful gadgets
+
+    for gadget in gadgets:
         if gadget.diff_sp in [8,0]:
             candidates_for_ret.append(gadget)
             gadgets.remove(gadget)
 
-    if depends_regs:
-        candidates_depends = findCandidatesGadgets(gadgets, depends_regs, set(), not_write_regs)
-    candidates = candidates_defined2 + candidates_pop + candidates_defined + candidates_write + candidates_no_return + candidates_depends + candidates_for_ret # ordered by useful gadgets
+    candidates += candidates_for_ret
     return candidates
 
 def extract_byte(bv, pos):
