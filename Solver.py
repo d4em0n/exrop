@@ -175,7 +175,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 
             refind_dict = {}
             if isinstance(val, str): # probably registers
-                if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg], str):
+                if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg], str) and gadget.defined_regs[reg] != reg:
                     refind_dict[gadget.defined_regs[reg]] = val
                     hasil = []
                 else:
