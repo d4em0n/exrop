@@ -6,9 +6,6 @@
         0x5000: 'pop rdx; ret',
     },
     "find": {
-        "rdi": 0x41414242,
-        "rsi": 0xffffffff,
-        "rdx": 0x43434343,
         "rax": 0x0b0c0a0d,
         "rbx": 0xddccbbaa,
     }

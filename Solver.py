@@ -3,6 +3,7 @@ import pickle
 from itertools import combinations, chain
 from triton import *
 from Gadget import *
+from RopChain import *
 
 def initialize():
     ctx = TritonContext()
@@ -78,7 +79,6 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
         if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read or gadget.is_memory_write or gadget.end_type == TYPE_UNKNOWN:
             gadgets.remove(gadget)
             continue
-
         badchar = False
         if avoid_char:
             for char in avoid_char:
@@ -140,7 +140,6 @@ def filter_byte(astctxt, bv, bc, bsize):
 
 def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=None, keep_regs=set()):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
-    final_solved = []
     solved_reg = dict()
     candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs)
     first_solves = solves.copy()
@@ -153,6 +152,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
     reglist = []
     written_regs_by_gadget = []
     solved_regs_by_gadget = []
+    chains = RopChain()
     for gadget in candidates:
         tmp_solved = dict()
         tmp_written_regs = set()
@@ -196,12 +196,12 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                     if filterbyte:
                         filterbyte.append(regAst == astCtxt.bv(val,64))
                         filterbyte = astCtxt.land(filterbyte)
-                        hasil = ctx.getModel(filterbyte).values()
+                        hasil = list(ctx.getModel(filterbyte).values())
                     if not hasil: # try to find again
-                        hasil = ctx.getModel(regAst == astCtxt.bv(val,64)).values()
+                        hasil = list(ctx.getModel(regAst == astCtxt.bv(val,64)).values())
 
                 else:
-                    hasil = ctx.getModel(regAst == astCtxt.bv(val,64)).values()
+                    hasil = list(ctx.getModel(regAst == astCtxt.bv(val,64)).values())
 
             for v in hasil:
                 alias = v.getVariable().getAlias()
@@ -242,7 +242,9 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 #            print("handling no return gadget")
             diff = 0
             if gadget.end_type == TYPE_JMP_REG:
+                print(candidates)
                 next_gadget = findForRet(candidates[:], 0, set(tmp_solved.keys()), avoid_char=avoid_char)
+                print(next_gadget)
             elif gadget.end_type == TYPE_CALL_REG:
                 next_gadget = findForRet(candidates[:], 8, set(tmp_solved.keys()), avoid_char=avoid_char)
                 diff = 8
@@ -275,44 +277,28 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 tmp_written_regs.update(kk)
                 tmp_written_regs.update(next_gadget.written_regs)
             if not hasil:
+                print("GAAD")
                 continue
             tmp_solved['rip'] = hasil
 
         tmp_written_regs.update(gadget.written_regs)
-        if set.intersection(tmp_written_regs, set(list(solved.keys()))):
-            intersect = True
         tmp_solved_regs = tuple(tmp_solved.keys())
-        if intersect and len(written_regs_by_gadget) > 0:
-            for i in range(len(written_regs_by_gadget)-1, -1, -1):
-                solved_before = set(chain(*solved_regs_by_gadget[:i+1]))
-                if set.intersection(set(tmp_solved.keys()), written_regs_by_gadget[i]) and not set.intersection(solved_before, tmp_written_regs):
-                    final_solved.insert(i+1, (gadget, tmp_solved.values()))
-                    written_regs_by_gadget.insert(i+1, tmp_written_regs)
-                    solved_regs_by_gadget.insert(i+1, tmp_solved_regs)
-                    break
-
-                regs_used_after = set(chain(*written_regs_by_gadget))
-                if i == 0:
-                    if not set.intersection(set(tmp_solved.keys()), regs_used_after):
-                        final_solved.insert(0, (gadget, tmp_solved.values()))
-                        written_regs_by_gadget.insert(0, tmp_written_regs)
-                        solved_regs_by_gadget.insert(0, tmp_solved_regs)
-                    else:
-                        tmp_solved = None # can't intersect gadget
-        else:
-            final_solved.append((gadget, tmp_solved.values()))
-            written_regs_by_gadget.append(tmp_written_regs)
-            solved_regs_by_gadget.append(tmp_solved_regs)
-        if not tmp_solved:
+        tmp_chain = Chain()
+        print(tmp_solved)
+        tmp_chain.set_solved(gadget, tmp_solved.keys(), list(tmp_solved.values()))
+        if not chains.insert_chain(tmp_chain):
+            print("can't insert")
             continue
+
         for reg in tmp_solved:
             if reg != 'rip':
                 del solves[reg]
         solved.update(tmp_solved)
         written_regs.update(tmp_written_regs)
         if not solves:
+            chains.dump_chains()
             written_regs.update(add_info)
-            return final_solved, written_regs
+            return chains, written_regs
     return [],[]
 
 def solveWriteGadgets(gadgets, solves, avoid_char=None):

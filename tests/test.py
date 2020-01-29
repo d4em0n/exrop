@@ -2,6 +2,7 @@ from ChainBuilder import ChainBuilder
 from Exrop import Exrop
 from Gadget import *
 import sys
+import code
 from keystone import *
 
 def asm_ins(code):
@@ -50,4 +51,4 @@ with open(sys.argv[1], "rb") as fp:
         test_pivot(data_test)
 
     build_chain = chain_builder.build_chain()
-    build_chain.dump()
+    build_chain.dump_chains()

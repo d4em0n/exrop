@@ -24,12 +24,7 @@ class ChainBuilder(object):
         self.raw_chain = solvePivot(self.gadgets.copy(), addr, avoid_char)
 
     def build_chain(self, next_call=None):
-        rop_chain = RopChain()
-        self.build_chain_recurse(self.raw_chain, rop_chain)
-        if next_call:
-            last_gadget = rop_chain.chains[-1]
-            last_gadget[1].append(next_call)
-        return rop_chain
+        return self.raw_chain
 
     def add_gadget_string(self, addr, gadget_string, gadget_opcode):
         gadget = Gadget(addr)
