@@ -223,10 +223,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             refind_dict = False
                             break
             if refind_dict:
-                if notFirst:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False, avoid_char)
-                else:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char)
+                hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char)
                 tmp_written_regs.update(kk)
 
             if hasil:
