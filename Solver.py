@@ -230,6 +230,8 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                 tmp_written_regs.update(kk)
 
             if hasil:
+                if isinstance(val, str):
+                    reg_to_reg_solve.add(gadget.defined_regs[reg])
                 tmp_solved[reg] = hasil
                 solved_reg[reg] = val
 
