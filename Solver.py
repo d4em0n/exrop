@@ -72,6 +72,7 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
     candidates_defined = []
     candidates_defined2 = []
     candidates_no_return = []
+    candidates_for_ret = []
     depends_regs = set()
     for gadget in list(gadgets):
         if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read or gadget.is_memory_write or gadget.end_type == TYPE_UNKNOWN:
@@ -114,10 +115,18 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
             candidates_write.append(gadget)
             gadgets.remove(gadget)
             depends_regs.update(gadget.depends_regs)
+            continue
 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, set(), not_write_regs)
-    candidates = candidates_defined2 + candidates_pop + candidates_defined + candidates_write + candidates_no_return + candidates_depends # ordered by useful gadgets
+    candidates = candidates_defined2 + candidates_pop + candidates_defined + candidates_write + candidates_no_return + candidates_depends  # ordered by useful gadgets
+
+    for gadget in gadgets:
+        if gadget.diff_sp in [8,0]:
+            candidates_for_ret.append(gadget)
+            gadgets.remove(gadget)
+
+    candidates += candidates_for_ret
     return candidates
 
 def extract_byte(bv, pos):
@@ -153,7 +162,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 
         reg_to_reg_solve = set()
         for reg,val in list(solves.items())[:]:
-            if reg not in gadget.written_regs or val in gadget.end_reg_used or reg in gadget.end_reg_used:
+            if reg not in gadget.written_regs or reg in gadget.end_reg_used:
                 continue
 
             regAst = gadget.regAst[reg]
@@ -166,7 +175,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 
             refind_dict = {}
             if isinstance(val, str): # probably registers
-                if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg], str):
+                if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg], str) and gadget.defined_regs[reg] != reg:
                     refind_dict[gadget.defined_regs[reg]] = val
                     hasil = []
                 else:
@@ -214,13 +223,12 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             refind_dict = False
                             break
             if refind_dict:
-                if notFirst:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False, avoid_char)
-                else:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char)
+                hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char)
                 tmp_written_regs.update(kk)
 
             if hasil:
+                if isinstance(val, str):
+                    reg_to_reg_solve.add(gadget.defined_regs[reg])
                 tmp_solved[reg] = hasil
                 solved_reg[reg] = val
 
@@ -263,10 +271,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             refind_dict = False
                             break
             if refind_dict:
-                if notFirst:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False, avoid_char, keep_regs=reg_to_reg_solve)
-                else:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char, keep_regs=reg_to_reg_solve)
+                hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char, keep_regs=reg_to_reg_solve)
                 tmp_written_regs.update(kk)
                 tmp_written_regs.update(next_gadget.written_regs)
             if not hasil:
