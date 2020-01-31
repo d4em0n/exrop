@@ -82,6 +82,14 @@ class RopChain(object):
             self.next_call.dump(next_sp, self.base_addr)
         print("")
 
+    def payload_str(self):
+        payload = b""
+        for chain in self.chains:
+            payload += chain.payload_str(self.base_addr)
+        if self.next_call:
+            payload += self.next_call.payload_str(self.base_addr)
+        return payload
+
 CHAINITEM_TYPE_VALUE = 0
 CHAINITEM_TYPE_ADDR = 1
 
@@ -149,6 +157,14 @@ class Chain(object):
             sp += 8
         print(dump_str, end="")
         return sp
+
+    def payload_str(self, base_addr=0):
+        chains = self.chains()
+        payload = b""
+        for i in range(len(chains)):
+            chain = chains[i]
+            payload += chain.getValue(base_addr).to_bytes(8, 'little')
+        return payload
 
     def __repr__(self):
         return "written_regs : {}\nsolved_regs: {}\n".format(self.written_regs, self.solved_regs)
