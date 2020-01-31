@@ -9,7 +9,7 @@ class ChainBuilder(object):
         self.raw_chain = None
 
     def solve_chain(self, avoid_char):
-        self.raw_chain,_ = solveGadgets(self.gadgets.copy(), self.regs, avoid_char=avoid_char)
+        self.raw_chain = solveGadgets(self.gadgets.copy(), self.regs, avoid_char=avoid_char)
 
     def set_regs(self, regs):
         self.regs = regs

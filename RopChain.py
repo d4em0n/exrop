@@ -1,5 +1,3 @@
-import code
-
 class RopChain(object):
     def __init__(self):
         self.chains = []
@@ -96,50 +94,59 @@ class RopChain(object):
             next_sp = chain.dump(next_sp)
         print("")
 
+class ChainItem(object):
+    def __init__(self, value=0, idx_chain=-1, comment="", type_val=0):
+        self.value = value
+        self.type_val = type_val
+        self.comment = comment
+        self.idx_chain = idx_chain
+
+    def parseFromModel(chain_value_model, comment="", type_val=0):
+        chain_item = chain_value_model[0]
+        alias = chain_item.getVariable().getAlias()
+        idxchain = int(alias.replace("STACK", "")) + 1
+        chain_value = chain_item.getValue()
+        return ChainItem(chain_value, idxchain, comment, type_val)
+
 class Chain(object):
     def __init__(self):
         self.written_regs = set()
         self.solved_regs = set()
         self.chain_values = []
-        self.comment = []
         self.gadget = None
 
-    def set_solved(self, gadget, regs, values):
+    def set_solved(self, gadget, values, regs=set(), written_regs=set()):
         self.solved_regs.update(regs)
         self.written_regs.update(gadget.written_regs)
+        self.written_regs.update(written_regs)
         self.gadget = gadget
-        chain_values = [0]*(gadget.diff_sp//8 + 1)
-        comment = [""]*(gadget.diff_sp//8 + 1)
-        chain_values[0] = gadget.addr
-        comment[0] = str(gadget)
+        depends_chain_values = []
+        chain_values = [ChainItem(0)]*(gadget.diff_sp//8 + 1)
+        chain_values[0] = ChainItem(gadget.addr, 0, str(gadget), 1)
         for chain_item in values:
-            print(type(chain_item))
             if isinstance(chain_item, RopChain):
                 self.written_regs.update(chain_item.get_written_regs())
-                self.chain_values = chain_item.get_chains() + self.chain_values
-                self.comment = chain_item.get_comment() + self.comment
+                depends_chain_values += chain_item.get_chains()
                 continue
-            chain_item = chain_item[0]
-            alias = chain_item.getVariable().getAlias()
-            idxchain = int(alias.replace("STACK", "")) + 1
-            chain_values[idxchain] = chain_item.getValue()
-            comment[idxchain] = "const"
-        self.chain_values += chain_values
-        self.comment += comment
+            if chain_item:
+                chain_values[chain_item.idx_chain] = chain_item
+
+        self.chain_values += depends_chain_values + chain_values
+        if gadget.end_gadget:
+            self.written_regs.update(gadget.end_gadget.written_regs)
 
     def chains(self):
         return self.chain_values
 
     def dump(self, sp):
         chains = self.chains()
-        comments = self.comment
         dump_str = ""
         for i in range(len(chains)):
-            value = chains[i]
+            chain = chains[i]
             com = ""
-            if comments[i]:
-                com = " # {}".format(comments[i])
-            dump_str += "$RSP+0x{:04x} : 0x{:016x}{}\n".format(sp, value, com)
+            if chain.comment:
+                com = " # {}".format(chain.comment)
+            dump_str += "$RSP+0x{:04x} : 0x{:016x}{}\n".format(sp, chain.value, com)
             sp += 8
         print(dump_str, end="")
         return sp
