@@ -51,4 +51,5 @@ with open(sys.argv[1], "rb") as fp:
         test_pivot(data_test)
 
     build_chain = chain_builder.build_chain()
-    build_chain.dump_chains()
+    build_chain.set_next_call(0x7ffff23132, "system")
+    build_chain.dump()

@@ -4,33 +4,19 @@ class RopChain(object):
         self.dump_str = None
         self.payload = b""
         self.base_addr = 0
-
-    def add(self, gadget, values):
-        self.chains.append((gadget, values))
-        self.dump_str = None
+        self.next_call = None
 
     def merge_ropchain(self, ropchain):
-        for gadget,values in ropchain.chains:
-            self.add(gadget, values)
+        if self.next_call:
+            self.append(self.next_call)
+        for chain in ropchain.chains:
+            self.append(chain)
+        self.next_call = ropchain.next_call
 
-    def dump(self):
-        sp = 0
-        dump_str = ""
-        for gadget,values in self.chains:
-            dump_str += "$RSP+0x{:04x} : 0x{:016x} # {}\n".format(sp, self.base_addr + gadget.addr, gadget)
-            sp += 8
-            for value in values:
-                dump_str += "$RSP+0x{:04x} : 0x{:016x}\n".format(sp, value)
-                sp += 8
-        print(dump_str)
-
-    def payload_str(self):
-        payload = b""
-        for gadget,values in self.chains:
-            payload += (self.base_addr + gadget.addr).to_bytes(8, 'little')
-            for value in values:
-                payload += value.to_bytes(8, 'little')
-        return payload
+    def set_next_call(self, addr, comment=""):
+        chain = Chain()
+        chain.set_chain_values([ChainItem(addr, 0, comment)])
+        self.next_call = chain
 
     def set_base_addr(self, addr):
         self.base_addr = addr
@@ -88,10 +74,12 @@ class RopChain(object):
             comments.extend(chain.comment)
         return comments
 
-    def dump_chains(self):
+    def dump(self):
         next_sp = 0
         for chain in self.chains:
             next_sp = chain.dump(next_sp)
+        if self.next_call:
+            self.next_call.dump(next_sp)
         print("")
 
 class ChainItem(object):
@@ -112,8 +100,11 @@ class Chain(object):
     def __init__(self):
         self.written_regs = set()
         self.solved_regs = set()
-        self.chain_values = []
         self.gadget = None
+        self.chain_values = []
+
+    def set_chain_values(self, chain_values):
+        self.chain_values = chain_values
 
     def set_solved(self, gadget, values, regs=set(), written_regs=set()):
         self.solved_regs.update(regs)

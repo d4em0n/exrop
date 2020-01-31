@@ -138,7 +138,7 @@ def filter_byte(astctxt, bv, bc, bsize):
         nbv.append(astctxt.lnot(astctxt.equal(astctxt.extract(i*8+7, i*8, bv),astctxt.bv(bc, 8))))
     return nbv
 
-def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=None, keep_regs=set()):
+def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set()):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs)
     ctx = initialize()
@@ -214,7 +214,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             refind_dict = False
                             break
             if refind_dict:
-                hasil = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char)
+                hasil = solveGadgets(candidates[:], refind_dict, avoid_char)
 
             if hasil:
                 if isinstance(val, str):
@@ -263,7 +263,7 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             refind_dict = False
                             break
             if refind_dict:
-                hasil = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char, keep_regs=reg_to_reg_solve)
+                hasil = solveGadgets(candidates[:], refind_dict, avoid_char, keep_regs=reg_to_reg_solve)
             if not hasil:
                 continue
             tmp_solved_regs.append('rip')

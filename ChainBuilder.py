@@ -24,6 +24,8 @@ class ChainBuilder(object):
         self.raw_chain = solvePivot(self.gadgets.copy(), addr, avoid_char)
 
     def build_chain(self, next_call=None):
+        if next_call:
+            self.raw_chain.set_next_call(next_call)
         return self.raw_chain
 
     def add_gadget_string(self, addr, gadget_string, gadget_opcode):
@@ -41,23 +43,6 @@ class ChainBuilder(object):
     def analyzeAll(self):
         for gadget in self.gadgets:
             gadget.analyzeGadget()
-
-    def build_chain_recurse(self, raw_chain, rop_chain):
-        for gadget, info in raw_chain:
-            len_gadget = gadget.diff_sp//8
-            chain = [0]*(len_gadget)
-            chain_chain = None
-            for l1 in info:
-                l1 = list(l1)
-                if l1 and isinstance(l1[0], tuple):
-                    self.build_chain_recurse(l1, rop_chain)
-                    continue
-                for chain_item in l1:
-                    alias = chain_item.getVariable().getAlias()
-                    idxchain = int(alias.replace("STACK", ""))
-                    chain[idxchain] = chain_item.getValue()
-
-            rop_chain.add(gadget, chain)
 
     def save_analyzed_gadgets(self):
         gadgets = self.gadgets[:]
