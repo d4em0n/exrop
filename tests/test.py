@@ -2,6 +2,7 @@ from ChainBuilder import ChainBuilder
 from Exrop import Exrop
 from Gadget import *
 import sys
+import code
 from keystone import *
 
 def asm_ins(code):

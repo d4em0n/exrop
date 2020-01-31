@@ -3,6 +3,7 @@ import pickle
 from itertools import combinations, chain
 from triton import *
 from Gadget import *
+from RopChain import *
 
 def initialize():
     ctx = TritonContext()
@@ -78,7 +79,6 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
         if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read or gadget.is_memory_write or gadget.end_type == TYPE_UNKNOWN:
             gadgets.remove(gadget)
             continue
-
         badchar = False
         if avoid_char:
             for char in avoid_char:
@@ -138,37 +138,28 @@ def filter_byte(astctxt, bv, bc, bsize):
         nbv.append(astctxt.lnot(astctxt.equal(astctxt.extract(i*8+7, i*8, bv),astctxt.bv(bc, 8))))
     return nbv
 
-def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=None, keep_regs=set()):
+def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dict()):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
-    final_solved = []
-    solved_reg = dict()
     candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs)
-    first_solves = solves.copy()
-    spi = 0
-    written_regs = set()
-    refind_solves = dict()
     ctx = initialize()
     astCtxt = ctx.getAstContext()
-    solved = {}
-    reglist = []
-    written_regs_by_gadget = []
-    solved_regs_by_gadget = []
+    chains = RopChain()
+
     for gadget in candidates:
-        tmp_solved = dict()
-        tmp_written_regs = set()
-        intersect = False
+        tmp_solved_ordered = []
+        tmp_solved_regs = []
         if gadget.regAst == None:
             gadget.buildAst()
 
         reg_to_reg_solve = set()
-        for reg,val in list(solves.items())[:]:
+        for reg,val in solves.items():
             if reg not in gadget.written_regs or reg in gadget.end_reg_used:
                 continue
 
             regAst = gadget.regAst[reg]
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
-                tmp_solved[reg] = []
-                solved_reg[reg] = val
+                tmp_solved_regs.append(reg)
+                tmp_solved_ordered.append([])
                 if isinstance(val, str):
                     reg_to_reg_solve.add(val)
                 continue
@@ -196,12 +187,12 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                     if filterbyte:
                         filterbyte.append(regAst == astCtxt.bv(val,64))
                         filterbyte = astCtxt.land(filterbyte)
-                        hasil = ctx.getModel(filterbyte).values()
+                        hasil = list(ctx.getModel(filterbyte).values())
                     if not hasil: # try to find again
-                        hasil = ctx.getModel(regAst == astCtxt.bv(val,64)).values()
+                        hasil = list(ctx.getModel(regAst == astCtxt.bv(val,64)).values())
 
                 else:
-                    hasil = ctx.getModel(regAst == astCtxt.bv(val,64)).values()
+                    hasil = list(ctx.getModel(regAst == astCtxt.bv(val,64)).values())
 
             for v in hasil:
                 alias = v.getVariable().getAlias()
@@ -223,16 +214,20 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             refind_dict = False
                             break
             if refind_dict:
-                hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char)
-                tmp_written_regs.update(kk)
+                hasil = solveGadgets(candidates[:], refind_dict, avoid_char)
 
             if hasil:
                 if isinstance(val, str):
                     reg_to_reg_solve.add(gadget.defined_regs[reg])
-                tmp_solved[reg] = hasil
-                solved_reg[reg] = val
+                if not isinstance(hasil, RopChain):
+                    type_chain = CHAINITEM_TYPE_VALUE
+                    if add_type and reg in add_type and add_type[reg] == CHAINITEM_TYPE_ADDR:
+                        type_chain = CHAINITEM_TYPE_ADDR
+                    hasil = ChainItem.parseFromModel(hasil, type_val=type_chain)
+                tmp_solved_ordered.append(hasil)
+                tmp_solved_regs.append(reg)
 
-        if not tmp_solved:
+        if not tmp_solved_ordered:
             continue
 
         if gadget.end_type != TYPE_RETURN:
@@ -242,9 +237,9 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
 #            print("handling no return gadget")
             diff = 0
             if gadget.end_type == TYPE_JMP_REG:
-                next_gadget = findForRet(candidates[:], 0, set(tmp_solved.keys()), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 0, set(tmp_solved_regs), avoid_char=avoid_char)
             elif gadget.end_type == TYPE_CALL_REG:
-                next_gadget = findForRet(candidates[:], 8, set(tmp_solved.keys()), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 8, set(tmp_solved_regs), avoid_char=avoid_char)
                 diff = 8
             if not next_gadget:
                 continue
@@ -256,11 +251,13 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
             hasil = ctx.getModel(regAst == val).values()
 
             refind_dict = {}
+            type_chains = {}
             for v in hasil:
                 alias = v.getVariable().getAlias()
                 if 'STACK' not in alias:
                     if alias in regs and alias not in refind_dict:
                         refind_dict[alias] = v.getValue()
+                        type_chains[alias] = CHAINITEM_TYPE_ADDR
                     else:
                         hasil = False
                         break
@@ -271,52 +268,26 @@ def solveGadgets(gadgets, solves, add_info=set(), notFirst=False, avoid_char=Non
                             refind_dict = False
                             break
             if refind_dict:
-                if notFirst:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, written_regs.copy(), False, avoid_char, keep_regs=reg_to_reg_solve)
-                else:
-                    hasil,kk = solveGadgets(candidates[:], refind_dict, {}, True, avoid_char, keep_regs=reg_to_reg_solve)
-                tmp_written_regs.update(kk)
-                tmp_written_regs.update(next_gadget.written_regs)
+                hasil = solveGadgets(candidates[:], refind_dict, avoid_char, add_type=type_chains, keep_regs=reg_to_reg_solve)
             if not hasil:
                 continue
-            tmp_solved['rip'] = hasil
+            tmp_solved_regs.append('rip')
+            tmp_solved_ordered.append(hasil)
 
-        tmp_written_regs.update(gadget.written_regs)
-        if set.intersection(tmp_written_regs, set(list(solved.keys()))):
-            intersect = True
-        tmp_solved_regs = tuple(tmp_solved.keys())
-        if intersect and len(written_regs_by_gadget) > 0:
-            for i in range(len(written_regs_by_gadget)-1, -1, -1):
-                solved_before = set(chain(*solved_regs_by_gadget[:i+1]))
-                if set.intersection(set(tmp_solved.keys()), written_regs_by_gadget[i]) and not set.intersection(solved_before, tmp_written_regs):
-                    final_solved.insert(i+1, (gadget, tmp_solved.values()))
-                    written_regs_by_gadget.insert(i+1, tmp_written_regs)
-                    solved_regs_by_gadget.insert(i+1, tmp_solved_regs)
-                    break
+        tmp_chain = Chain()
+        tmp_chain.set_solved(gadget, tmp_solved_ordered, tmp_solved_regs)
 
-                regs_used_after = set(chain(*written_regs_by_gadget))
-                if i == 0:
-                    if not set.intersection(set(tmp_solved.keys()), regs_used_after):
-                        final_solved.insert(0, (gadget, tmp_solved.values()))
-                        written_regs_by_gadget.insert(0, tmp_written_regs)
-                        solved_regs_by_gadget.insert(0, tmp_solved_regs)
-                    else:
-                        tmp_solved = None # can't intersect gadget
-        else:
-            final_solved.append((gadget, tmp_solved.values()))
-            written_regs_by_gadget.append(tmp_written_regs)
-            solved_regs_by_gadget.append(tmp_solved_regs)
-        if not tmp_solved:
-            continue
-        for reg in tmp_solved:
+        if not chains.insert_chain(tmp_chain):
+            continue # can't insert chain
+
+        for reg in tmp_solved_regs:
             if reg != 'rip':
                 del solves[reg]
-        solved.update(tmp_solved)
-        written_regs.update(tmp_written_regs)
+
         if not solves:
-            written_regs.update(add_info)
-            return final_solved, written_regs
-    return [],[]
+            return chains
+
+    return []
 
 def solveWriteGadgets(gadgets, solves, avoid_char=None):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
@@ -324,13 +295,14 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
     candidates = findCandidatesWriteGadgets(gadgets, avoid_char=avoid_char)
     ctx = initialize()
     gwr = list(candidates.keys())
+    chains = RopChain()
     gwr.sort()
     for w in gwr:
         for gadget in candidates[w]:
             if not gadget.memory_write_ast:
                 gadget.buildAst()
             for addr,val in list(solves.items())[:]:
-                tmp_solved = dict()
+                tmp_solved = []
                 mem_ast = gadget.memory_write_ast[0]
                 if mem_ast[1].getBitvectorSize() != 64:
                     break
@@ -350,21 +322,21 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
                             hasil = False
                             break
                 if hasil and refind_dict:
-                    hasil,_ = solveGadgets(gadgets[:], refind_dict)
+                    hasil = solveGadgets(gadgets[:], refind_dict)
                 if hasil:
-                    tmp_solved[addr] = hasil
+                    tmp_solved.append(hasil)
                     del solves[addr]
-                    final_solved.append((gadget, tmp_solved.values()))
+                    chain = Chain()
+                    chain.set_solved(gadget, [hasil])
+                    chains.insert_chain(chain)
                     if not solves:
-                        return final_solved
+                        return chains
 
 def solvePivot(gadgets, addr_pivot, avoid_char=None):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
-    final_solved = []
     candidates = findPivot(gadgets, avoid_char=avoid_char)
     ctx = initialize()
-    final_solved = []
-    tmp_solved = dict()
+    chains = RopChain()
     for gadget in candidates:
         if not gadget.pivot_ast:
             gadget.buildAst()
@@ -382,11 +354,12 @@ def solvePivot(gadgets, addr_pivot, avoid_char=None):
                 idxchain = int(alias.replace("STACK", ""))
                 new_diff_sp = (idxchain+1)*8
         if hasil and refind_dict:
-            hasil,_ = solveGadgets(gadgets[:], refind_dict)
+            hasil = solveGadgets(gadgets[:], refind_dict)
             new_diff_sp = 0
         if not hasil:
             continue
         gadget.diff_sp = new_diff_sp
-        tmp_solved[addr_pivot] = hasil
-        final_solved.append((gadget, tmp_solved.values()))
-        return final_solved
+        chain = Chain()
+        chain.set_solved(gadget, [hasil])
+        chains.insert_chain(chain)
+        return chains
