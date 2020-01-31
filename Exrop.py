@@ -64,8 +64,9 @@ class Exrop(object):
         writes = dict()
         for addr,sstr in strs.items():
             tmpaddr = 0
+            sstr += "\x00"
             for i in range(0, len(sstr), BSIZE):
-                tmpstr = int.from_bytes(bytes(sstr[i:i+BSIZE]+"\x00", 'utf-8'), 'little')
+                tmpstr = int.from_bytes(bytes(sstr[i:i+BSIZE], 'utf-8'), 'little')
                 writes[addr+tmpaddr] = tmpstr
                 tmpaddr += BSIZE
         return self.set_writes(writes, next_call)
@@ -79,11 +80,10 @@ class Exrop(object):
             arg = args[i]
             if isinstance(arg, str) and arg not in regsx86_64:
                 assert rwaddr, "Please define read write addr"
-                arg += "\x00"
                 chain = self.set_string({rwaddr:arg})
                 ropchain.merge_ropchain(chain)
                 regs[order_reg[i]] = rwaddr
-                rwaddr += len(arg)
+                rwaddr += len(arg) + 1 # for null byte
                 continue
             regs[order_reg[i]] = arg
         chain = self.set_regs(regs, func_addr)
