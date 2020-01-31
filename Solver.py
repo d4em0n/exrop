@@ -302,7 +302,6 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
             if not gadget.memory_write_ast:
                 gadget.buildAst()
             for addr,val in list(solves.items())[:]:
-                tmp_solved = []
                 mem_ast = gadget.memory_write_ast[0]
                 if mem_ast[1].getBitvectorSize() != 64:
                     break
@@ -322,9 +321,8 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
                             hasil = False
                             break
                 if hasil and refind_dict:
-                    hasil = solveGadgets(gadgets[:], refind_dict)
+                    hasil = solveGadgets(gadgets[:], refind_dict, avoid_char=avoid_char)
                 if hasil:
-                    tmp_solved.append(hasil)
                     del solves[addr]
                     chain = Chain()
                     chain.set_solved(gadget, [hasil])
@@ -354,7 +352,7 @@ def solvePivot(gadgets, addr_pivot, avoid_char=None):
                 idxchain = int(alias.replace("STACK", ""))
                 new_diff_sp = (idxchain+1)*8
         if hasil and refind_dict:
-            hasil = solveGadgets(gadgets[:], refind_dict)
+            hasil = solveGadgets(gadgets[:], refind_dict, avoid_char=avoid_char)
             new_diff_sp = 0
         if not hasil:
             continue
