@@ -77,9 +77,9 @@ class RopChain(object):
     def dump(self):
         next_sp = 0
         for chain in self.chains:
-            next_sp = chain.dump(next_sp)
+            next_sp = chain.dump(next_sp, self.base_addr)
         if self.next_call:
-            self.next_call.dump(next_sp)
+            self.next_call.dump(next_sp, self.base_addr)
         print("")
 
 class ChainItem(object):
@@ -95,6 +95,11 @@ class ChainItem(object):
         idxchain = int(alias.replace("STACK", "")) + 1
         chain_value = chain_item.getValue()
         return ChainItem(chain_value, idxchain, comment, type_val)
+
+    def getValue(self, base_addr=0):
+        if base_addr and self.type_val == 1: # check if value is address
+            return self.value + base_addr
+        return self.value
 
 class Chain(object):
     def __init__(self):
@@ -129,7 +134,7 @@ class Chain(object):
     def chains(self):
         return self.chain_values
 
-    def dump(self, sp):
+    def dump(self, sp, base_addr=0):
         chains = self.chains()
         dump_str = ""
         for i in range(len(chains)):
@@ -137,7 +142,7 @@ class Chain(object):
             com = ""
             if chain.comment:
                 com = " # {}".format(chain.comment)
-            dump_str += "$RSP+0x{:04x} : 0x{:016x}{}\n".format(sp, chain.value, com)
+            dump_str += "$RSP+0x{:04x} : 0x{:016x}{}\n".format(sp, chain.getValue(base_addr), com)
             sp += 8
         print(dump_str, end="")
         return sp
