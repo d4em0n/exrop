@@ -82,6 +82,9 @@ class RopChain(object):
             self.next_call.dump(next_sp, self.base_addr)
         print("")
 
+CHAINITEM_TYPE_VALUE = 0
+CHAINITEM_TYPE_ADDR = 1
+
 class ChainItem(object):
     def __init__(self, value=0, idx_chain=-1, comment="", type_val=0):
         self.value = value
@@ -118,7 +121,7 @@ class Chain(object):
         self.gadget = gadget
         depends_chain_values = []
         chain_values = [ChainItem(0)]*(gadget.diff_sp//8 + 1)
-        chain_values[0] = ChainItem(gadget.addr, 0, str(gadget), 1)
+        chain_values[0] = ChainItem(gadget.addr, 0, str(gadget), CHAINITEM_TYPE_ADDR)
         for chain_item in values:
             if isinstance(chain_item, RopChain):
                 self.written_regs.update(chain_item.get_written_regs())

@@ -138,7 +138,7 @@ def filter_byte(astctxt, bv, bc, bsize):
         nbv.append(astctxt.lnot(astctxt.equal(astctxt.extract(i*8+7, i*8, bv),astctxt.bv(bc, 8))))
     return nbv
 
-def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set()):
+def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dict()):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs)
     ctx = initialize()
@@ -220,7 +220,10 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set()):
                 if isinstance(val, str):
                     reg_to_reg_solve.add(gadget.defined_regs[reg])
                 if not isinstance(hasil, RopChain):
-                    hasil = ChainItem.parseFromModel(hasil)
+                    type_chain = CHAINITEM_TYPE_VALUE
+                    if add_type and reg in add_type and add_type[reg] == CHAINITEM_TYPE_ADDR:
+                        type_chain = CHAINITEM_TYPE_ADDR
+                    hasil = ChainItem.parseFromModel(hasil, type_val=type_chain)
                 tmp_solved_ordered.append(hasil)
                 tmp_solved_regs.append(reg)
 
@@ -248,11 +251,13 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set()):
             hasil = ctx.getModel(regAst == val).values()
 
             refind_dict = {}
+            type_chains = {}
             for v in hasil:
                 alias = v.getVariable().getAlias()
                 if 'STACK' not in alias:
                     if alias in regs and alias not in refind_dict:
                         refind_dict[alias] = v.getValue()
+                        type_chains[alias] = CHAINITEM_TYPE_ADDR
                     else:
                         hasil = False
                         break
@@ -263,7 +268,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set()):
                             refind_dict = False
                             break
             if refind_dict:
-                hasil = solveGadgets(candidates[:], refind_dict, avoid_char, keep_regs=reg_to_reg_solve)
+                hasil = solveGadgets(candidates[:], refind_dict, avoid_char, add_type=type_chains, keep_regs=reg_to_reg_solve)
             if not hasil:
                 continue
             tmp_solved_regs.append('rip')
