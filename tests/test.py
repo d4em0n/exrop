@@ -52,5 +52,5 @@ with open(sys.argv[1], "rb") as fp:
 
     build_chain = chain_builder.build_chain()
     build_chain.set_next_call(0x7ffff23132, "system")
-    build_chain.set_base_addr(0x7ffff0000)
+    build_chain.set_base_addr(0x7fffff0000)
     build_chain.dump()
