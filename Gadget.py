@@ -100,16 +100,20 @@ class Gadget(object):
         regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
 
         for reg in regs:
-            symbolizeReg(ctx, reg)
+            svar = ctx.newSymbolicVariable(64)
+            svar.setAlias(reg)
+            locals()[reg] = astCtxt.variable(svar)
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
 
-        diff_sp = self.diff_sp
+        diff_sp = self.diff_sp//8
         if diff_sp > MAX_FILL_STACK or diff_sp < 0:
             diff_sp = MAX_FILL_STACK
 
         for i in range(diff_sp):
-            tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
-            tmpb.setAlias("STACK{}".format(i))
+            alias = "STACK"+str(i)
+            svar = ctx.newSymbolicVariable(64)
+            svar.setAlias(alias)
+            locals()[alias] = astCtxt.variable(svar)
 
         BSIZE = 8 # default for now
 
@@ -263,3 +267,4 @@ class Gadget(object):
         self.diff_sp = sp - STACK
         self.is_analyzed = True
         self.is_asted = True
+        code.interact(local=locals())
