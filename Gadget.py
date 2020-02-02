@@ -111,6 +111,8 @@ class Gadget(object):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
             tmpb.setAlias("STACK{}".format(i))
 
+        BSIZE = 8 # default for now
+
         variables = ctx.getSymbolicVariables()
         for i,var in variables.items(): # get all symbolic variable for the next eval
             locals()[var.getAlias()] = astCtxt.variable(var)
@@ -128,7 +130,10 @@ class Gadget(object):
             val = eval(val_ast)
             if isinstance(val, int):
                 val = astCtxt.bv(val, sz_val)
-            new_mem_ast.append((eval(addr_ast), val))
+            addr = eval(addr_ast)
+            if isinstance(val, int):
+                addr = astCtxt.bv(addr, BSIZE)
+            new_mem_ast.append((addr, val))
         self.memory_write_ast = new_mem_ast
 
         if self.pivot_ast:
