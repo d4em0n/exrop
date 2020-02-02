@@ -14,7 +14,6 @@ def initialize():
 def symbolizeReg(ctx, regname):
     tmp = ctx.symbolizeRegister(getattr(ctx.registers,regname))
     tmp.setAlias(regname)
-    return ctx.getSymbolicRegister(getTritonReg(ctx, regname)).getAst()
 
 def getTritonReg(ctx, regname):
     return getattr(ctx.registers, regname)
@@ -156,9 +155,8 @@ class Gadget(object):
         regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
         syscalls = ["syscall"]
 
-        reglist = dict()
         for reg in regs:
-            reglist[reg] = symbolizeReg(ctx, reg)
+            symbolizeReg(ctx, reg)
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
 
         for i in range(MAX_FILL_STACK):
