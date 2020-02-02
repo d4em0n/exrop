@@ -267,4 +267,3 @@ class Gadget(object):
         self.diff_sp = sp - STACK
         self.is_analyzed = True
         self.is_asted = True
-        code.interact(local=locals())
