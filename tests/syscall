@@ -1,0 +1,11 @@
+{
+    "gadgets": {
+        0x6000: 'syscall',
+        0x4000: 'mov rcx, rbx; add rcx, 100; ret',
+
+    },
+    "find": {
+        "rax": 0x43434343,
+        "rsi": 0x41414141,
+    }
+}

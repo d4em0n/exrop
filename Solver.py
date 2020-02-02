@@ -148,7 +148,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
     for gadget in candidates:
         tmp_solved_ordered = []
         tmp_solved_regs = []
-        if gadget.regAst == None:
+        if not gadget.is_asted:
             gadget.buildAst()
 
         reg_to_reg_solve = set()
@@ -299,7 +299,7 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
     gwr.sort()
     for w in gwr:
         for gadget in candidates[w]:
-            if not gadget.memory_write_ast:
+            if not gadget.is_asted:
                 gadget.buildAst()
             for addr,val in list(solves.items())[:]:
                 mem_ast = gadget.memory_write_ast[0]
@@ -336,7 +336,7 @@ def solvePivot(gadgets, addr_pivot, avoid_char=None):
     ctx = initialize()
     chains = RopChain()
     for gadget in candidates:
-        if not gadget.pivot_ast:
+        if not gadget.is_asted:
             gadget.buildAst()
         hasil = ctx.getModel(gadget.pivot_ast == addr_pivot).values()
         for v in hasil:

@@ -62,17 +62,19 @@ class Gadget(object):
         self.regAst = dict()
         self.diff_sp = 0 # jarak rsp ke rbp sesaaat sebelum ret
         self.is_analyzed = False
+        self.is_asted = False
         self.insstr = ""
         self.insns = b""
         self.is_memory_write = 0
         self.is_memory_read = 0 # not pop
         self.memory_write_ast = []
-        self.end_type = TYPE_RETURN # default ret
+        self.end_type = TYPE_UNKNOWN
         self.end_ast = None
         self.end_gadget = 0 # return gadget to fix no-return gadgets
         self.end_reg_used = set() # register used in end_ast
         self.pivot = 0
         self.pivot_ast = None
+        self.is_syscall = False
 
     def __repr__(self):
         append_com = ""
@@ -95,59 +97,45 @@ class Gadget(object):
     def buildAst(self):
         ctx = initialize()
         astCtxt = ctx.getAstContext()
-        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"]
+        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
 
         for reg in regs:
             symbolizeReg(ctx, reg)
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
 
-        for i in range(MAX_FILL_STACK):
+        for i in range(self.diff_sp):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
             tmpb.setAlias("STACK{}".format(i))
 
-        self.regAst = dict()
-        self.memory_write_ast = []
-        BSIZE = 8
+        variables = ctx.getSymbolicVariables()
+        for i,var in variables.items(): # get all symbolic variable for the next eval
+            locals()[var.getAlias()] = astCtxt.variable(var)
 
-        sp = STACK
-        instructions = self.insns
-        pc = 0
+        newRegAst = dict()
+        for regname,ast in self.regAst.items():
+            newRegAst[regname] = eval(ast) # eval-ing ast symbolic python expressions
+        self.regAst = newRegAst
 
-        while True:
-            inst = Instruction()
-            inst.setOpcode(instructions[pc:pc+16])
-            inst.setAddress(pc)
-            ctx.processing(inst)
+        new_mem_ast = []
+        for addr_ast,val_ast in self.memory_write_ast:
+            new_mem_ast.append((eval(addr_ast), (eval(val_ast))))
+        self.memory_write_ast = new_mem_ast
 
-            if inst.isControlFlow(): # check if end of gadget
-                type_end = self.end_type
-                if type_end == TYPE_CALL_MEM or type_end == TYPE_JMP_MEM:
-                    self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
-                elif type_end == TYPE_CALL_REG or type_end == TYPE_JMP_REG:
-                    self.end_ast = ctx.getSymbolicRegister(ctx.registers.rip).getAst()
-#                code.interact(local=locals())
-                break
-            pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
-            sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
-            if inst.isMemoryWrite() and self.is_memory_write:
-                for store_access in inst.getStoreAccess():
-                    addr_ast = store_access[0].getLeaAst()
-                    val_ast = store_access[1]
-                    self.memory_write_ast.append((addr_ast, val_ast))
+        if self.pivot_ast:
+            self.pivot_ast = eval(self.pivot_ast)
 
-        if ctx.isRegisterSymbolized(ctx.registers.rsp):
-            self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst() - 8
-            if self.pivot_ast:
-                self.pivot = 1
+        if self.end_ast:
+            self.end_ast = eval(self.end_ast)
 
-        for reg in self.written_regs:
-            self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
+        self.is_asted = True
+
 
     def analyzeGadget(self, debug=False):
         BSIZE = 8
         ctx = initialize()
         astCtxt = ctx.getAstContext()
-        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"]
+        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+        syscalls = ["syscall"]
 
         reglist = dict()
         for reg in regs:
@@ -157,6 +145,7 @@ class Gadget(object):
         for i in range(MAX_FILL_STACK):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
             tmpb.setAlias("STACK{}".format(i))
+            reglist["STACK{}".format(i)] = ctx.getSymbolicMemoryValue
 
         sp = STACK
         instructions = self.insns
@@ -193,17 +182,17 @@ class Gadget(object):
                 if (sp - sp_after) == BSIZE and len(tmp_red) > 0:
                     if inst.isMemoryRead():
                         type_end = TYPE_CALL_MEM
-                        self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
+                        self.end_ast = ctx.simplify(inst.getLoadAccess()[0][0].getLeaAst(), True)
                     else:
                         type_end = TYPE_CALL_REG
-                        self.end_ast = ctx.getSymbolicRegister(ctx.registers.rip).getAst()
+                        self.end_ast = ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rip).getAst(), True)
                 elif sp == sp_after and len(tmp_red) > 0:
                     if inst.isMemoryRead() and not inst.isBranch():
                         type_end = TYPE_JMP_MEM
-                        self.end_ast = inst.getLoadAccess()[0][0].getLeaAst()
+                        self.end_ast = ctx.simplify(inst.getLoadAccess()[0][0].getLeaAst(), True)
                     else:
                         type_end = TYPE_JMP_REG
-                        self.end_ast = ctx.getSymbolicRegister(ctx.registers.rip).getAst()
+                        self.end_ast = ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rip).getAst(), True)
                 elif sp_after - sp == BSIZE:
                     type_end = TYPE_RETURN
                 else:
@@ -213,26 +202,31 @@ class Gadget(object):
 #                code.interact(local=locals())
                 break
 
+            elif inst.getDisassembly() in syscalls:
+                self.is_syscall = True
+
             if not pop and inst.isMemoryRead():
                 self.is_memory_read = 1
 
             if inst.isMemoryWrite() and 'mov' in inst.getDisassembly():
                 for store_access in inst.getStoreAccess():
-                    addr_ast = store_access[0].getLeaAst()
-                    val_ast = store_access[1]
+                    addr_ast = ctx.simplify(store_access[0].getLeaAst(), True)
+                    val_ast = ctx.simplify(store_access[1], True)
                     self.memory_write_ast.append((addr_ast, val_ast))
                     self.is_memory_write += 1
 
             pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
             sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
+            if pc >= len(instructions):
+                break
 
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
-            self.pivot_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst() - 8
+            self.pivot_ast = ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rsp).getAst() - 8, True)
             if self.pivot_ast:
                 self.pivot = 1
 
         for reg in self.written_regs:
-            self.regAst[reg] = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
+            self.regAst[reg] = ctx.simplify(ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst(), True)
             simplified = ctx.simplify(self.regAst[reg], True)
             if str(simplified) in regs:
                 self.defined_regs[reg] = str(simplified)
@@ -253,7 +247,4 @@ class Gadget(object):
 
         self.diff_sp = sp - STACK
         self.is_analyzed = True
-        if debug:
-            print("DEBUG")
-            code.interact(local=locals())
-
+        self.is_asted = True

@@ -45,12 +45,26 @@ class ChainBuilder(object):
             gadget.analyzeGadget()
 
     def save_analyzed_gadgets(self):
-        gadgets = self.gadgets[:]
+        gadgets = self.gadgets
         for gadget in gadgets:
-            gadget.regAst = None # AstNode can't be cached
-            gadget.memory_write_ast = None # AstNode can't be cached
-            gadget.end_ast = None # AstNode can't be cached
-            gadget.pivot_ast = None # AstNode can't be cached
+            newRegAst = dict()
+            for reg,val in gadget.regAst.items():
+                newRegAst[reg] = str(val)
+            gadget.regAst = newRegAst
+
+            newMemAst = []
+            for addr,val in gadget.memory_write_ast:
+                newMemAst.append((str(addr), str(val)))
+            gadget.memory_write_ast = newMemAst
+
+            if gadget.end_ast:
+                gadget.end_ast = str(gadget.end_ast)
+
+            if gadget.pivot_ast:
+                gadget.pivot_ast = str(gadget.pivot_ast)
+
+            gadget.is_asted = False
+
         saved = pickle.dumps(gadgets)
         return saved
 
