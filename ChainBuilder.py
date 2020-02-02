@@ -1,6 +1,7 @@
 from Solver import *
 from Gadget import *
 from RopChain import *
+import copy
 
 class ChainBuilder(object):
     def __init__(self, gadgets=list()):
@@ -45,25 +46,46 @@ class ChainBuilder(object):
             gadget.analyzeGadget()
 
     def save_analyzed_gadgets(self):
-        gadgets = self.gadgets
-        for gadget in gadgets:
+        gadgets = []
+        for old_gadget in self.gadgets:
+            # save state
+            oldRegAst = old_gadget.regAst
+            oldMemASt = old_gadget.memory_write_ast
+            oldEndAst = old_gadget.end_ast
+            oldPivotAst = old_gadget.pivot_ast
+
+
+            old_gadget.regAst = None
+            old_gadget.memory_write_ast = None
+            old_gadget.end_ast = None
+            old_gadget.pivot_ast = None
+
+            # ast node can't pickle, convert all to string
+            gadget = copy.deepcopy(old_gadget)
             newRegAst = dict()
-            for reg,val in gadget.regAst.items():
+            for reg,val in oldRegAst.items():
                 newRegAst[reg] = str(val)
             gadget.regAst = newRegAst
 
             newMemAst = []
-            for addr,val in gadget.memory_write_ast:
+            for addr,val in oldMemASt:
                 newMemAst.append((str(addr), str(val)))
             gadget.memory_write_ast = newMemAst
 
             if gadget.end_ast:
-                gadget.end_ast = str(gadget.end_ast)
+                gadget.end_ast = str(oldEndAst)
 
             if gadget.pivot_ast:
-                gadget.pivot_ast = str(gadget.pivot_ast)
+                gadget.pivot_ast = str(oldPivotAst)
 
             gadget.is_asted = False
+            gadgets.append(gadget)
+
+            # reload state
+            old_gadget.regAst = oldRegAst
+            old_gadget.memory_write_ast = oldMemASt
+            old_gadget.end_ast = oldEndAst
+            old_gadget.pivot_ast = oldPivotAst
 
         saved = pickle.dumps(gadgets)
         return saved
