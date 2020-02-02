@@ -244,7 +244,7 @@ class Gadget(object):
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.simplify(ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst(), True)
-            simplified = ctx.simplify(self.regAst[reg], True)
+            simplified = self.regAst[reg]
             if str(simplified) in regs:
                 self.defined_regs[reg] = str(simplified)
                 continue
@@ -259,8 +259,6 @@ class Gadget(object):
         defregs = set(filter(lambda i: isinstance(self.defined_regs[i],int),
                               self.defined_regs.keys()))
         self.depends_regs = set.difference(self.read_regs, defregs)
-        if isinstance(self.end_ast, str): # can't handle symbolic end gadget right now:
-            self.depends_regs.add(self.end_ast)
 
         self.diff_sp = sp - STACK
         self.is_analyzed = True
