@@ -64,18 +64,18 @@ class ChainBuilder(object):
             gadget = copy.deepcopy(old_gadget)
             newRegAst = dict()
             for reg,val in oldRegAst.items():
-                newRegAst[reg] = str(val)
+                newRegAst[reg] = (str(val), val.getBitvectorSize())
             gadget.regAst = newRegAst
 
             newMemAst = []
             for addr,val in oldMemASt:
-                newMemAst.append((str(addr), str(val)))
+                newMemAst.append((str(addr), str(val), val.getBitvectorSize()))
             gadget.memory_write_ast = newMemAst
 
-            if gadget.end_ast:
+            if oldEndAst:
                 gadget.end_ast = str(oldEndAst)
 
-            if gadget.pivot_ast:
+            if oldPivotAst:
                 gadget.pivot_ast = str(oldPivotAst)
 
             gadget.is_asted = False

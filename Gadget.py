@@ -103,7 +103,11 @@ class Gadget(object):
             symbolizeReg(ctx, reg)
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
 
-        for i in range(self.diff_sp):
+        diff_sp = self.diff_sp
+        if diff_sp > MAX_FILL_STACK or diff_sp < 0:
+            diff_sp = MAX_FILL_STACK
+
+        for i in range(diff_sp):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
             tmpb.setAlias("STACK{}".format(i))
 
@@ -113,12 +117,18 @@ class Gadget(object):
 
         newRegAst = dict()
         for regname,ast in self.regAst.items():
-            newRegAst[regname] = eval(ast) # eval-ing ast symbolic python expressions
+            val = eval(ast[0])
+            if isinstance(val, int):
+                val = astCtxt.bv(val, ast[1])
+            newRegAst[regname] = val # eval-ing ast symbolic python expressions
         self.regAst = newRegAst
 
         new_mem_ast = []
-        for addr_ast,val_ast in self.memory_write_ast:
-            new_mem_ast.append((eval(addr_ast), (eval(val_ast))))
+        for addr_ast,val_ast,sz_val in self.memory_write_ast:
+            val = eval(val_ast)
+            if isinstance(val, int):
+                val = astCtxt.bv(val, sz_val)
+            new_mem_ast.append((eval(addr_ast), val))
         self.memory_write_ast = new_mem_ast
 
         if self.pivot_ast:
