@@ -179,5 +179,5 @@ $RSP+0x0020 : 0x00007ffff7a07e6a # pop rsi ; ret
 $RSP+0x0028 : 0x00000000003ec860
 $RSP+0x0030 : 0x0000000000110140
 
-done in 3.0s (Running on: A9-9420 RADEON R5 2C+3G (2) @ 3.000GHz)
+done in 3.0s (Running on: A9-9420 RADEON R5 2C+3G (2) @ 3.000GHz (using cached))
 ```
