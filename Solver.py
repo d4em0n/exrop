@@ -138,7 +138,7 @@ def filter_byte(astctxt, bv, bc, bsize):
         nbv.append(astctxt.lnot(astctxt.equal(astctxt.extract(i*8+7, i*8, bv),astctxt.bv(bc, 8))))
     return nbv
 
-def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dict()):
+def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dict(), for_refind=set()):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs)
     ctx = initialize()
@@ -150,7 +150,6 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
         tmp_solved_regs = []
         if not gadget.is_asted:
             gadget.buildAst()
-
         reg_to_reg_solve = set()
         for reg,val in solves.items():
             if reg not in gadget.written_regs or reg in gadget.end_reg_used:
@@ -198,7 +197,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                 alias = v.getVariable().getAlias()
                 if 'STACK' not in alias:
                     if alias in regs and alias not in refind_dict:
-                        if alias != reg or v.getValue() != val:
+                        if (alias != reg and alias not in for_refind) or v.getValue() != val:
                             refind_dict[alias] = v.getValue()
                         else:
                             hasil = False
@@ -214,7 +213,9 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                             refind_dict = False
                             break
             if refind_dict:
-                hasil = solveGadgets(candidates[:], refind_dict, avoid_char)
+                tmp_for_refind = for_refind.copy() # don't overwrite old value
+                tmp_for_refind.add(reg)
+                hasil = solveGadgets(candidates[:], refind_dict, avoid_char, for_refind=tmp_for_refind)
 
             if hasil:
                 if isinstance(val, str):
@@ -292,7 +293,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
 def solveWriteGadgets(gadgets, solves, avoid_char=None):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     final_solved = []
-    candidates = findCandidatesWriteGadgets(gadgets, avoid_char=avoid_char)
+    candidates = findCandidatesWriteGadgets(gadgets[:], avoid_char=avoid_char)
     ctx = initialize()
     gwr = list(candidates.keys())
     chains = RopChain()
