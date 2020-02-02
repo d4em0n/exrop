@@ -162,7 +162,6 @@ class Gadget(object):
         for i in range(MAX_FILL_STACK):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
             tmpb.setAlias("STACK{}".format(i))
-            reglist["STACK{}".format(i)] = ctx.getSymbolicMemoryValue
 
         sp = STACK
         instructions = self.insns
