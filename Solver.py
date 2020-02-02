@@ -195,10 +195,10 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
 
             for v in hasil:
                 alias = v.getVariable().getAlias()
-                if 'STACK' not in alias:
-                    if alias in regs and alias not in refind_dict:
+                if 'STACK' not in alias: # check if value is found not in stack
+                    if alias in regs and alias not in refind_dict: # check if value is found in reg
                         if (alias != reg and alias not in for_refind) or v.getValue() != val:
-                            refind_dict[alias] = v.getValue()
+                            refind_dict[alias] = v.getValue() # re-search value with new reg
                         else:
                             hasil = False
                             refind_dict = {}
