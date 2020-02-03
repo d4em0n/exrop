@@ -113,9 +113,9 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, set(), not_write_regs)
     if cand_write_first:
-        candidates = candidates_pop + candidates_write + candidates_defined2 + candidates_defined + candidates_depends  # ordered by useful gadgets
+        candidates = candidates_write + candidates_defined2 + candidates_pop + candidates_defined + candidates_depends  # ordered by useful gadgets
     else:
-        candidates = candidates_defined2 + candidates_pop + candidates_write + candidates_defined + candidates_no_return + candidates_depends  # ordered by useful gadgets
+        candidates = candidates_defined2 + candidates_pop + candidates_defined + candidates_write + candidates_no_return + candidates_depends  # ordered by useful gadgets
 
     for gadget in gadgets:
         if gadget.diff_sp in [8,0]:
