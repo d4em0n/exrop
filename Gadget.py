@@ -203,7 +203,7 @@ class Gadget(object):
                         type_end = TYPE_CALL_REG
                         self.end_ast = ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rip).getAst(), True)
                 elif sp == sp_after and len(tmp_red) > 0:
-                    if inst.isMemoryRead() and not inst.isBranch():
+                    if inst.isMemoryRead():
                         type_end = TYPE_JMP_MEM
                         self.end_ast = ctx.simplify(inst.getLoadAccess()[0][0].getLeaAst(), True)
                     else:

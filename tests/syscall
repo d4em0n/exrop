@@ -1,5 +1,6 @@
 {
     "gadgets": {
+        0x5000: 'pop rbx; jmp qword ptr [rax]',
         0x6000: 'syscall',
         0x4000: 'mov rcx, rbx; add rcx, 100; ret',
 

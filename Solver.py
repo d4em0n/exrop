@@ -66,7 +66,7 @@ def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
             candidates.append(gadget)
     return candidates
 
-def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(), avoid_char=None):
+def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(), avoid_char=None, cand_write_first=False):
     candidates_pop = []
     candidates_write = []
     candidates_depends = []
@@ -76,7 +76,7 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
     candidates_for_ret = []
     depends_regs = set()
     for gadget in list(gadgets):
-        if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read or gadget.is_memory_write or gadget.end_type == TYPE_UNKNOWN:
+        if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read or gadget.is_memory_write or gadget.end_type in [TYPE_UNKNOWN, TYPE_JMP_MEM, TYPE_CALL_MEM]:
             gadgets.remove(gadget)
             continue
         badchar = False
@@ -119,7 +119,10 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, set(), not_write_regs)
-    candidates = candidates_defined2 + candidates_pop + candidates_defined + candidates_write + candidates_no_return + candidates_depends  # ordered by useful gadgets
+    if cand_write_first:
+        candidates = candidates_write + candidates_defined2 + candidates_pop + candidates_defined + candidates_no_return + candidates_depends  # ordered by useful gadgets
+    else:
+        candidates = candidates_defined2 + candidates_pop + candidates_write + candidates_defined + candidates_no_return + candidates_depends  # ordered by useful gadgets
 
     for gadget in gadgets:
         if gadget.diff_sp in [8,0]:
@@ -138,13 +141,27 @@ def filter_byte(astctxt, bv, bc, bsize):
         nbv.append(astctxt.lnot(astctxt.equal(astctxt.extract(i*8+7, i*8, bv),astctxt.bv(bc, 8))))
     return nbv
 
-def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dict(), for_refind=set()):
+def check_contain_avoid_char(regvals, avoid_char):
+    for char in avoid_char:
+        for val in regvals:
+            valb = val.to_bytes(8, 'little')
+            if char in valb:
+                return True
+    return False
+
+def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dict(), for_refind=set(), rec_limit=0):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
-    candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs)
+    find_write_first = False
+    if avoid_char:
+        find_write_first = check_contain_avoid_char(solves.values(), avoid_char)
+    candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs, cand_write_first=find_write_first)
     ctx = initialize()
     astCtxt = ctx.getAstContext()
     chains = RopChain()
+    reg_refind = set()
 
+    if rec_limit >= 30: # maximum recursion
+        return []
     for gadget in candidates:
         tmp_solved_ordered = []
         tmp_solved_regs = []
@@ -172,21 +189,28 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                     continue
             else:
                 if avoid_char:
+                    if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg],int):
+                        continue
                     simpl = ctx.simplify(regAst, True)
                     childs = simpl.getChildren()
                     if not childs:
                         childs = [simpl]
                     filterbyte = []
-                    lval = len(val.to_bytes(8, 'little').rstrip(b"\x00"))
                     hasil = False
-                    for child in childs:
-                        for char in avoid_char:
-                            fb = filter_byte(astCtxt, child, char, lval)
-                            filterbyte.extend(fb)
-                    if filterbyte:
-                        filterbyte.append(regAst == astCtxt.bv(val,64))
-                        filterbyte = astCtxt.land(filterbyte)
-                        hasil = list(ctx.getModel(filterbyte).values())
+                    valb = val.to_bytes(8, 'little')
+                    lval = len(valb.strip(b"\x00"))
+                    for char in avoid_char:
+                        if char in valb:
+                            for child in childs:
+                                if child.getBitvectorSize() >= lval*8:
+                                    for char in avoid_char:
+                                        fb = filter_byte(astCtxt, child, char, lval)
+                                        filterbyte.extend(fb)
+                            if filterbyte:
+                                filterbyte.append(regAst == astCtxt.bv(val,64))
+                                filterbyte = astCtxt.land(filterbyte)
+                                hasil = list(ctx.getModel(filterbyte).values())
+                            break
                     if not hasil: # try to find again
                         hasil = list(ctx.getModel(regAst == astCtxt.bv(val,64)).values())
 
@@ -197,11 +221,23 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                 alias = v.getVariable().getAlias()
                 if 'STACK' not in alias: # check if value is found not in stack
                     if alias in regs and alias not in refind_dict: # check if value is found in reg
-                        if (alias != reg and alias not in for_refind) or v.getValue() != val:
+
+                        # check if reg for next search contain avoid char, if
+                        # true break
+                        if alias == reg and avoid_char:
+                            valb = v.getValue().to_bytes(8, 'little')
+                            for char in avoid_char:
+                                if char in valb:
+                                    hasil = False
+                                    refind_dict = False
+                            if not hasil:
+                                break
+
+                        if ((alias != reg and (alias,val) not in for_refind) or v.getValue() != val):
                             refind_dict[alias] = v.getValue() # re-search value with new reg
                         else:
                             hasil = False
-                            refind_dict = {}
+                            refind_dict = False
                             break
                     else:
                         hasil = False
@@ -214,8 +250,9 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                             break
             if refind_dict:
                 tmp_for_refind = for_refind.copy() # don't overwrite old value
-                tmp_for_refind.add(reg)
-                hasil = solveGadgets(candidates[:], refind_dict, avoid_char, for_refind=tmp_for_refind)
+                tmp_for_refind.add((reg,val))
+                reg_refind.update(set(list(refind_dict.keys())))
+                hasil = solveGadgets(candidates[:], refind_dict, avoid_char, for_refind=tmp_for_refind, rec_limit=rec_limit+1)
 
             if hasil:
                 if isinstance(val, str):
@@ -232,7 +269,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
             continue
 
         if gadget.end_type != TYPE_RETURN:
-            if set.intersection(set(list(solves.keys())), gadget.end_reg_used):
+            if set.intersection(set(list(solves.keys())), gadget.end_reg_used) or not gadget.end_ast:
                 continue
             next_gadget = None
 #            print("handling no return gadget")
@@ -249,7 +286,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
 
             regAst = gadget.end_ast
             val = gadget.end_gadget.addr
-            hasil = ctx.getModel(regAst == val).values()
+            hasil = list(ctx.getModel(regAst == val).values())
 
             refind_dict = {}
             type_chains = {}
@@ -269,9 +306,14 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                             refind_dict = False
                             break
             if refind_dict:
+                reg_to_reg_solve.update(tmp_solved_regs)
+                reg_to_reg_solve.update(reg_refind)
                 hasil = solveGadgets(candidates[:], refind_dict, avoid_char, add_type=type_chains, keep_regs=reg_to_reg_solve)
             if not hasil:
                 continue
+            if not isinstance(hasil, RopChain):
+                type_chain = CHAINITEM_TYPE_ADDR
+                hasil = ChainItem.parseFromModel(hasil, type_val=type_chain)
             tmp_solved_regs.append('rip')
             tmp_solved_ordered.append(hasil)
 
