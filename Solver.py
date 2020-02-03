@@ -281,6 +281,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                             refind_dict = False
                             break
             if refind_dict:
+#                print((gadget,refind_dict,rec_limit))
                 tmp_for_refind = for_refind.copy() # don't overwrite old value
                 tmp_for_refind.add((reg,val))
                 reg_refind.update(set(list(refind_dict.keys())))
@@ -360,7 +361,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
         tmp_chain.set_solved(gadget, tmp_solved_ordered, tmp_solved_regs)
 
         if not chains.insert_chain(tmp_chain):
-            print("failed insert")
+#            print("failed insert")
             continue # can't insert chain
 
         for reg in tmp_solved_regs:
