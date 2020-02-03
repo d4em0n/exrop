@@ -49,23 +49,23 @@ class RopChain(object):
         return True
 
     def get_solved_regs(self, start_chain=None, end_chain=None):
-        regs_solved = []
+        regs_solved = set()
         chains = self.chains[start_chain:end_chain]
         for chain in chains:
-            regs_solved.extend(chain.solved_regs)
+            regs_solved.update(chain.solved_regs)
         return regs_solved
 
     def get_written_regs(self, start_chain=None, end_chain=None):
-        regs_written = []
+        regs_written = set()
         chains = self.chains[start_chain:end_chain]
         for chain in chains:
-            regs_written.extend(chain.written_regs)
+            regs_written.update(chain.written_regs)
         return regs_written
 
     def get_chains(self):
         chains = []
         for chain in self.chains:
-            chains.extend(chain.chains())
+            chains.extend(chain.get_chains())
         return chains
 
     def get_comment(self):
@@ -142,11 +142,17 @@ class Chain(object):
         if gadget.end_gadget:
             self.written_regs.update(gadget.end_gadget.written_regs)
 
-    def chains(self):
+    def get_chains(self):
         return self.chain_values
 
+    def get_written_regs(self):
+        return self.written_regs
+
+    def get_solved_regs(self):
+        return self.solved_regs
+
     def dump(self, sp, base_addr=0):
-        chains = self.chains()
+        chains = self.get_chains()
         dump_str = ""
         for i in range(len(chains)):
             chain = chains[i]
@@ -159,7 +165,7 @@ class Chain(object):
         return sp
 
     def payload_str(self, base_addr=0):
-        chains = self.chains()
+        chains = self.get_chains()
         payload = b""
         for i in range(len(chains)):
             chain = chains[i]

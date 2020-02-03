@@ -89,13 +89,6 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
         if badchar:
             continue
 
-        if gadget.end_type != TYPE_RETURN:
-            if gadget.end_type == TYPE_JMP_REG or gadget.end_type == TYPE_CALL_REG:
-                depends_regs.update(gadget.depends_regs)
-                candidates_no_return.append(gadget)
-            gadgets.remove(gadget)
-            continue
-
         if set.intersection(regs_write,set(gadget.defined_regs.keys())):
             if regs_items and set.intersection(regs_items, set(gadget.defined_regs.items())):
                 candidates_defined2.append(gadget)
@@ -120,7 +113,7 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
     if depends_regs:
         candidates_depends = findCandidatesGadgets(gadgets, depends_regs, set(), not_write_regs)
     if cand_write_first:
-        candidates = candidates_write + candidates_defined2 + candidates_pop + candidates_defined + candidates_no_return + candidates_depends  # ordered by useful gadgets
+        candidates = candidates_pop + candidates_write + candidates_defined2 + candidates_defined + candidates_depends  # ordered by useful gadgets
     else:
         candidates = candidates_defined2 + candidates_pop + candidates_write + candidates_defined + candidates_no_return + candidates_depends  # ordered by useful gadgets
 
@@ -149,12 +142,45 @@ def check_contain_avoid_char(regvals, avoid_char):
                 return True
     return False
 
+def get_all_solved(tmp_solved):
+    written_regs = set()
+    for solved in tmp_solved:
+        written_regs.update(solved.get_written_regs())
+    return written_regs
+
+def get_all_written(tmp_solved):
+    solved_regs = set()
+    for solved in tmp_solved:
+        solved_regs.update(solved.get_solved_regs())
+    return solved_regs
+
+def insert_tmp_solved(tmp_solved, solved):
+    intersect = False
+    if set.intersection(solved.get_written_regs(), get_all_solved(tmp_solved)):
+        intersect = True
+    if intersect and len(tmp_solved) > 0:
+        for i in range(len(tmp_solved)-1, -1, -1):
+            solved_before = get_all_solved(tmp_solved[:i+1])
+            if set.intersection(solved.get_solved_regs(), tmp_solved[i].get_written_regs()) and not set.intersection(solved_before, solved.get_written_regs()):
+                tmp_solved.insert(i+1, solved)
+                break
+
+            regs_used_after = get_all_written(tmp_solved)
+            if i == 0:
+                if not set.intersection(solved.get_solved_regs(), regs_used_after):
+                    tmp_solved.insert(0, solved)
+                else:
+                    return False
+    else:
+        tmp_solved.append(solved)
+    return True
+
 def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dict(), for_refind=set(), rec_limit=0):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     find_write_first = False
     if avoid_char:
         find_write_first = check_contain_avoid_char(solves.values(), avoid_char)
-    candidates = findCandidatesGadgets(gadgets, set(solves.keys()), set(solves.items()), avoid_char=avoid_char, not_write_regs=keep_regs, cand_write_first=find_write_first)
+    candidates = findCandidatesGadgets(gadgets[:], set(solves.keys()), set(solves.items()), avoid_char=avoid_char, cand_write_first=find_write_first)
     ctx = initialize()
     astCtxt = ctx.getAstContext()
     chains = RopChain()
@@ -162,12 +188,18 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
 
     if rec_limit >= 30: # maximum recursion
         return []
+
     for gadget in candidates:
         tmp_solved_ordered = []
         tmp_solved_regs = []
+        tmp_solved_ordered2 = []
         if not gadget.is_asted:
             gadget.buildAst()
         reg_to_reg_solve = set()
+
+        if set.intersection(keep_regs, gadget.written_regs):
+            continue
+
         for reg,val in solves.items():
             if reg not in gadget.written_regs or reg in gadget.end_reg_used:
                 continue
@@ -262,10 +294,13 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                     if add_type and reg in add_type and add_type[reg] == CHAINITEM_TYPE_ADDR:
                         type_chain = CHAINITEM_TYPE_ADDR
                     hasil = ChainItem.parseFromModel(hasil, type_val=type_chain)
-                tmp_solved_ordered.append(hasil)
-                tmp_solved_regs.append(reg)
+                    tmp_solved_ordered.append(hasil)
+                    tmp_solved_regs.append(reg)
+                else:
+                    if insert_tmp_solved(tmp_solved_ordered2, hasil):
+                        tmp_solved_regs.append(reg)
 
-        if not tmp_solved_ordered:
+        if not tmp_solved_regs:
             continue
 
         if gadget.end_type != TYPE_RETURN:
@@ -308,19 +343,24 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
             if refind_dict:
                 reg_to_reg_solve.update(tmp_solved_regs)
                 reg_to_reg_solve.update(reg_refind)
-                hasil = solveGadgets(candidates[:], refind_dict, avoid_char, add_type=type_chains, keep_regs=reg_to_reg_solve)
+                hasil = solveGadgets(gadgets, refind_dict, avoid_char, add_type=type_chains, keep_regs=reg_to_reg_solve, rec_limit=rec_limit+1)
             if not hasil:
                 continue
             if not isinstance(hasil, RopChain):
                 type_chain = CHAINITEM_TYPE_ADDR
                 hasil = ChainItem.parseFromModel(hasil, type_val=type_chain)
+                tmp_solved_ordered.append(hasil)
+            else:
+                insert_tmp_solved(tmp_solved_ordered2, hasil)
             tmp_solved_regs.append('rip')
-            tmp_solved_ordered.append(hasil)
+
+        tmp_solved_ordered.extend(tmp_solved_ordered2)
 
         tmp_chain = Chain()
         tmp_chain.set_solved(gadget, tmp_solved_ordered, tmp_solved_regs)
 
         if not chains.insert_chain(tmp_chain):
+            print("failed insert")
             continue # can't insert chain
 
         for reg in tmp_solved_regs:
