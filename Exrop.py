@@ -59,7 +59,7 @@ class Exrop(object):
         ropchain = self.chain_builder.build_chain(next_call)
         return ropchain
 
-    def set_string(self, strs, next_call=None):
+    def set_string(self, strs, next_call=None, avoid_char=None):
         BSIZE = 8
         writes = dict()
         for addr,sstr in strs.items():
@@ -69,7 +69,7 @@ class Exrop(object):
                 tmpstr = int.from_bytes(bytes(sstr[i:i+BSIZE], 'utf-8'), 'little')
                 writes[addr+tmpaddr] = tmpstr
                 tmpaddr += BSIZE
-        return self.set_writes(writes, next_call)
+        return self.set_writes(writes, next_call, avoid_char=avoid_char)
 
     def func_call(self, func_addr, args, rwaddr=None, convention="sysv"):
         order_reg = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
