@@ -224,10 +224,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                 if avoid_char:
                     if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg],int):
                         continue
-                    simpl = ctx.simplify(regAst, True)
-                    childs = simpl.getChildren()
-                    if not childs:
-                        childs = [simpl]
+                    childs = astCtxt.search(regAst, AST_NODE.VARIABLE)
                     filterbyte = []
                     hasil = False
                     valb = val.to_bytes(8, 'little')
