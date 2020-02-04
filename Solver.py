@@ -336,12 +336,6 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                     else:
                         hasil = False
                         break
-                elif avoid_char: # check if stack is popped contain avoid char
-                    for char in avoid_char:
-                        if char in val.to_bytes(8, 'little'):
-                            hasil = False
-                            refind_dict = False
-                            break
             if refind_dict:
                 reg_to_reg_solve.update(tmp_solved_regs)
                 reg_to_reg_solve.update(reg_refind)
