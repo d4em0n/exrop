@@ -142,13 +142,13 @@ def check_contain_avoid_char(regvals, avoid_char):
                 return True
     return False
 
-def get_all_solved(tmp_solved):
+def get_all_written(tmp_solved):
     written_regs = set()
     for solved in tmp_solved:
         written_regs.update(solved.get_written_regs())
     return written_regs
 
-def get_all_written(tmp_solved):
+def get_all_solved(tmp_solved):
     solved_regs = set()
     for solved in tmp_solved:
         solved_regs.update(solved.get_solved_regs())
@@ -164,7 +164,6 @@ def insert_tmp_solved(tmp_solved, solved):
             if set.intersection(solved.get_solved_regs(), tmp_solved[i].get_written_regs()) and not set.intersection(solved_before, solved.get_written_regs()):
                 tmp_solved.insert(i+1, solved)
                 break
-
             regs_used_after = get_all_written(tmp_solved)
             if i == 0:
                 if not set.intersection(solved.get_solved_regs(), regs_used_after):
