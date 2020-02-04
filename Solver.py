@@ -137,6 +137,8 @@ def filter_byte(astctxt, bv, bc, bsize):
 def check_contain_avoid_char(regvals, avoid_char):
     for char in avoid_char:
         for val in regvals:
+            if isinstance(val, str):
+                continue
             valb = val.to_bytes(8, 'little')
             if char in valb:
                 return True
