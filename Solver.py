@@ -52,7 +52,7 @@ def findForRet(gadgets, min_diff_sp=0, not_write_regs=set(), avoid_char=None):
             continue
         if isintersect(not_write_regs, gadget.written_regs):
             continue
-        if not gadget.is_memory_write and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
+        if not gadget.is_memory_read and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
             return gadget
 
 def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
@@ -72,6 +72,22 @@ def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
         if gadget.pivot:
             candidates.append(gadget)
     return candidates
+
+def findSyscallRet(gadgets, not_write_regs=set(), avoid_char=None):
+    for gadget in list(gadgets):
+        badchar = False
+        if avoid_char:
+            for char in avoid_char:
+                addrb = gadget.addr.to_bytes(8, 'little')
+                if char in addrb:
+                    badchar = True
+                    break
+        if badchar:
+            continue
+        if isintersect(not_write_regs, gadget.written_regs):
+            continue
+        if not gadget.is_memory_read and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.is_syscall:
+            return gadget
 
 def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(), avoid_char=None, cand_write_first=False):
     candidates_pop = []

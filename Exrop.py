@@ -1,9 +1,10 @@
 from ChainBuilder import ChainBuilder
 from RopChain import RopChain
 from os import popen
+import code
 
 def parseRopGadget(filename):
-    cmd = 'ROPgadget --binary {} --only "pop|xchg|add|sub|xor|mov|ret|jmp|call|leave" --dump | tail -n +3 | head -n -2'.format(filename)
+    cmd = 'ROPgadget --binary {} --multibr --only "pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|leave" --dump | tail -n +3 | head -n -2'.format(filename)
     with popen(cmd) as fp:
         sample_gadgets = dict()
         datas = fp.read().strip().split("\n")
@@ -71,8 +72,13 @@ class Exrop(object):
                 tmpaddr += BSIZE
         return self.set_writes(writes, next_call, avoid_char=avoid_char)
 
-    def func_call(self, func_addr, args, rwaddr=None, convention="sysv"):
-        order_reg = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+    def func_call(self, func_addr, args, rwaddr=None, convention="sysv", type_val_addr=0, comment=""):
+        call_convention = {
+            "sysv": ["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
+            "syscall_x86-64": ["rax", "rdi", "rsi", "rdx", "r10", "r8", "r9"]
+
+        }
+        order_reg = call_convention[convention]
         regsx86_64 = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
         regs = dict()
         ropchain = RopChain()
@@ -86,6 +92,13 @@ class Exrop(object):
                 rwaddr += len(arg) + 1 # for null byte
                 continue
             regs[order_reg[i]] = arg
-        chain = self.set_regs(regs, func_addr)
+        chain = self.set_regs(regs)
         ropchain.merge_ropchain(chain)
+        ropchain.set_next_call(func_addr, type_val_addr, comment=comment)
         return ropchain
+
+    def syscall(self, sysnum, args, rwaddr=None):
+        reg_used_syscall = set(["rax", "rdi", "rsi", "rdx", "r10", "r8", "r9"])
+        args = (sysnum,) + args
+        syscall_addr = self.chain_builder.get_syscall_ret_addr(not_write_regs=reg_used_syscall)
+        return self.func_call(syscall_addr.addr, args, rwaddr, convention="syscall_x86-64", type_val_addr=1, comment=str(syscall_addr))

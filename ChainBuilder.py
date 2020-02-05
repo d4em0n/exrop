@@ -9,11 +9,14 @@ class ChainBuilder(object):
         self.regs = dict()
         self.raw_chain = None
 
-    def solve_chain(self, avoid_char):
+    def solve_chain(self, avoid_char=None):
         self.raw_chain = solveGadgets(self.gadgets.copy(), self.regs, avoid_char=avoid_char)
 
     def set_regs(self, regs):
         self.regs = regs
+
+    def get_syscall_ret_addr(self, not_write_regs=set(), avoid_char=None):
+        return findSyscallRet(self.gadgets.copy(), not_write_regs, avoid_char=avoid_char)
 
     def set_writes(self, writes):
         self.writes = writes

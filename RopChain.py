@@ -20,9 +20,9 @@ class RopChain(object):
             self.append(chain)
         self.next_call = ropchain.next_call
 
-    def set_next_call(self, addr, comment=""):
+    def set_next_call(self, addr, type_val=0, comment=""):
         chain = Chain()
-        chain.set_chain_values([ChainItem(addr, 0, comment)])
+        chain.set_chain_values([ChainItem(addr, type_val, comment)])
         self.next_call = chain
 
     def set_base_addr(self, addr):
