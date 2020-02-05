@@ -101,4 +101,5 @@ class Exrop(object):
         reg_used_syscall = set(["rax", "rdi", "rsi", "rdx", "r10", "r8", "r9"])
         args = (sysnum,) + args
         syscall_addr = self.chain_builder.get_syscall_ret_addr(not_write_regs=reg_used_syscall)
+        assert syscall_addr,"can't find syscall; ret gadget!"
         return self.func_call(syscall_addr.addr, args, rwaddr, convention="syscall_x86-64", type_val_addr=1, comment=str(syscall_addr))
