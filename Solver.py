@@ -12,6 +12,13 @@ def initialize():
     ctx.setAstRepresentationMode(AST_REPRESENTATION.PYTHON)
     return ctx
 
+def isintersect(a,b):
+    for i in a:
+        for j in b:
+            if i==j:
+                return True
+    return False
+
 def findCandidatesWriteGadgets(gadgets, avoid_char=None):
     candidates = {}
     for gadget in list(gadgets):
@@ -43,7 +50,7 @@ def findForRet(gadgets, min_diff_sp=0, not_write_regs=set(), avoid_char=None):
                     break
         if badchar:
             continue
-        if set.intersection(not_write_regs, gadget.written_regs):
+        if isintersect(not_write_regs, gadget.written_regs):
             continue
         if not gadget.is_memory_write and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
             return gadget
@@ -60,7 +67,7 @@ def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
                     break
         if badchar:
             continue
-        if set.intersection(not_write_regs, gadget.written_regs):
+        if isintersect(not_write_regs, gadget.written_regs):
             continue
         if gadget.pivot:
             candidates.append(gadget)
@@ -76,7 +83,7 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
     candidates_for_ret = []
     depends_regs = set()
     for gadget in list(gadgets):
-        if set.intersection(not_write_regs, gadget.written_regs) or gadget.is_memory_read or gadget.is_memory_write or gadget.end_type in [TYPE_UNKNOWN, TYPE_JMP_MEM, TYPE_CALL_MEM]:
+        if isintersect(not_write_regs, gadget.written_regs) or gadget.is_memory_read or gadget.is_memory_write or gadget.end_type in [TYPE_UNKNOWN, TYPE_JMP_MEM, TYPE_CALL_MEM]:
             gadgets.remove(gadget)
             continue
         badchar = False
@@ -89,8 +96,8 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
         if badchar:
             continue
 
-        if set.intersection(regs_write,set(gadget.defined_regs.keys())):
-            if regs_items and set.intersection(regs_items, set(gadget.defined_regs.items())):
+        if isintersect(regs_write,set(gadget.defined_regs.keys())):
+            if regs_items and isintersect(regs_items, set(gadget.defined_regs.items())):
                 candidates_defined2.append(gadget)
             else:
                 candidates_defined.append(gadget)
@@ -98,13 +105,13 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(),
             depends_regs.update(gadget.depends_regs)
             continue
 
-        if set.intersection(regs_write,gadget.popped_regs):
+        if isintersect(regs_write,gadget.popped_regs):
             candidates_pop.append(gadget)
             gadgets.remove(gadget)
             depends_regs.update(gadget.depends_regs)
             continue
 
-        if set.intersection(regs_write,gadget.written_regs):
+        if isintersect(regs_write,gadget.written_regs):
             candidates_write.append(gadget)
             gadgets.remove(gadget)
             depends_regs.update(gadget.depends_regs)
@@ -158,17 +165,17 @@ def get_all_solved(tmp_solved):
 
 def insert_tmp_solved(tmp_solved, solved):
     intersect = False
-    if set.intersection(solved.get_written_regs(), get_all_solved(tmp_solved)):
+    if isintersect(solved.get_written_regs(), get_all_solved(tmp_solved)):
         intersect = True
     if intersect and len(tmp_solved) > 0:
         for i in range(len(tmp_solved)-1, -1, -1):
             solved_before = get_all_solved(tmp_solved[:i+1])
-            if set.intersection(solved.get_solved_regs(), tmp_solved[i].get_written_regs()) and not set.intersection(solved_before, solved.get_written_regs()):
+            if isintersect(solved.get_solved_regs(), tmp_solved[i].get_written_regs()) and not isintersect(solved_before, solved.get_written_regs()):
                 tmp_solved.insert(i+1, solved)
                 break
             regs_used_after = get_all_written(tmp_solved)
             if i == 0:
-                if not set.intersection(solved.get_solved_regs(), regs_used_after):
+                if not isintersect(solved.get_solved_regs(), regs_used_after):
                     tmp_solved.insert(0, solved)
                 else:
                     return False
@@ -198,7 +205,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
             gadget.buildAst()
         reg_to_reg_solve = set()
 
-        if set.intersection(keep_regs, gadget.written_regs):
+        if isintersect(keep_regs, gadget.written_regs):
             continue
 
         for reg,val in solves.items():
@@ -232,15 +239,13 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                     for char in avoid_char:
                         if char in valb:
                             for child in childs:
-                                if child.getBitvectorSize() >= lval*8:
-                                    for char in avoid_char:
-                                        fb = filter_byte(astCtxt, child, char, lval)
-                                        filterbyte.extend(fb)
+                                for char in avoid_char:
+                                    fb = filter_byte(astCtxt, child, char, lval)
+                                    filterbyte.extend(fb)
                             if filterbyte:
                                 filterbyte.append(regAst == astCtxt.bv(val,64))
                                 filterbyte = astCtxt.land(filterbyte)
                                 hasil = list(ctx.getModel(filterbyte).values())
-                            break
                     if not hasil: # try to find again
                         hasil = list(ctx.getModel(regAst == astCtxt.bv(val,64)).values())
 
@@ -303,7 +308,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
             continue
 
         if gadget.end_type != TYPE_RETURN:
-            if set.intersection(set(list(solves.keys())), gadget.end_reg_used) or not gadget.end_ast:
+            if isintersect(set(list(solves.keys())), gadget.end_reg_used) or not gadget.end_ast:
                 continue
             next_gadget = None
 #            print("handling no return gadget")
@@ -345,7 +350,6 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                 tmp_solved_ordered.append(hasil)
             else:
                 insert_tmp_solved(tmp_solved_ordered2, hasil)
-            tmp_solved_regs.append('rip')
 
         tmp_solved_ordered.extend(tmp_solved_ordered2)
 
@@ -357,8 +361,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
             continue # can't insert chain
 
         for reg in tmp_solved_regs:
-            if reg != 'rip':
-                del solves[reg]
+            del solves[reg]
 
         if not solves:
             return chains

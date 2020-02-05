@@ -1,3 +1,10 @@
+def isintersect(a,b):
+    for i in a:
+        for j in b:
+            if i==j:
+                return True
+    return False
+
 class RopChain(object):
     def __init__(self):
         self.chains = []
@@ -29,18 +36,18 @@ class RopChain(object):
 
     def insert_chain(self, chain):
         intersect = False
-        if set.intersection(chain.written_regs, set(self.get_solved_regs())):
+        if isintersect(chain.written_regs, set(self.get_solved_regs())):
             intersect = True
         if intersect and len(self.chains) > 0:
             for i in range(len(self.chains)-1, -1, -1):
                 solved_before = set(self.get_solved_regs(0,i+1))
-                if set.intersection(chain.solved_regs, self.chains[i].written_regs) and not set.intersection(solved_before, chain.written_regs):
+                if isintersect(chain.solved_regs, self.chains[i].written_regs) and not isintersect(solved_before, chain.written_regs):
                     self.insert(i+1, chain)
                     break
 
                 regs_used_after = set(self.get_written_regs())
                 if i == 0:
-                    if not set.intersection(chain.solved_regs, regs_used_after):
+                    if not isintersect(chain.solved_regs, regs_used_after):
                         self.insert(0, chain)
                     else:
                         return False
