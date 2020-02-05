@@ -17,6 +17,14 @@ Features:
 - stack pivoting (`Exrop.stack_pivot`)
 - syscall (`Exrop.syscall`)
 - see [examples](examples)
+
+# installation
+1. install python (3.6 is recomended and tested)
+2. install triton (https://triton.quarkslab.com/documentation/doxygen/index.html#linux_install_sec), make sure you add `-DPYTHON36=on` as cmake option
+3. install ropgadget (https://github.com/JonathanSalwan/ROPgadget)
+4. to install exrop, easily add `export PYTHONPATH=/path/to/exrop:$PYTHONPATH` in your `.bashrc` (depends on your shell)
+
+# demo
 ``` python
 from Exrop import Exrop
 
