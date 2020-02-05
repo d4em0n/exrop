@@ -244,8 +244,9 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                                     filterbyte.extend(fb)
                             if filterbyte:
                                 filterbyte.append(regAst == astCtxt.bv(val,64))
-                                filterbyte = astCtxt.land(filterbyte)
-                                hasil = list(ctx.getModel(filterbyte).values())
+                    if filterbyte:
+                        filterbyte = astCtxt.land(filterbyte)
+                        hasil = list(ctx.getModel(filterbyte).values())
                     if not hasil: # try to find again
                         hasil = list(ctx.getModel(regAst == astCtxt.bv(val,64)).values())
 
