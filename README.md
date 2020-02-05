@@ -3,6 +3,8 @@ Automatic ROP Chain Generation
 
 Requirements : [Triton](https://github.com/JonathanSalwan/Triton), [ROPGadget](https://github.com/JonathanSalwan/ROPgadget)
 
+Only support for x86-64 for now!
+
 Features:
 - handling non-return gadgets (jmp reg, call reg)
 - set registers (`rdi=0xxxxxx, rsi=0xxxxxx`)
@@ -14,6 +16,7 @@ Features:
 - avoiding badchars
 - stack pivoting (`Exrop.stack_pivot`)
 - syscall (`Exrop.syscall`)
+- see [examples](examples)
 ``` python
 from Exrop import Exrop
 
