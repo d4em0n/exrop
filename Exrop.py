@@ -76,8 +76,8 @@ class Exrop(object):
         call_convention = {
             "sysv": ["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
             "syscall_x86-64": ["rax", "rdi", "rsi", "rdx", "r10", "r8", "r9"]
-
         }
+
         order_reg = call_convention[convention]
         regsx86_64 = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
         regs = dict()
