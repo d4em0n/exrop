@@ -3,8 +3,8 @@ from RopChain import RopChain
 from os import popen
 import code
 
-def parseRopGadget(filename):
-    cmd = 'ROPgadget --binary {} --multibr --only "pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|leave" --dump | tail -n +3 | head -n -2'.format(filename)
+def parseRopGadget(filename, opt=""):
+    cmd = 'ROPgadget {} --binary {} --multibr --only "pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|leave" --dump | tail -n +3 | head -n -2'.format(opt, filename)
     with popen(cmd) as fp:
         sample_gadgets = dict()
         datas = fp.read().strip().split("\n")
@@ -22,7 +22,7 @@ class Exrop(object):
         self.binary = binary
         self.chain_builder = ChainBuilder()
 
-    def find_gadgets(self, cache=False):
+    def find_gadgets(self, cache=False, add_opt=""):
         if cache:
             fcname = "./{}.exrop_cache".format(self.binary.replace("/", "_"))
             try:
@@ -32,7 +32,7 @@ class Exrop(object):
                     return
             except FileNotFoundError:
                 fc = open(fcname, "wb")
-        gadgets = parseRopGadget(self.binary)
+        gadgets = parseRopGadget(self.binary, add_opt)
         self.chain_builder.load_list_gadget_string(gadgets)
         self.chain_builder.analyzeAll()
         if cache:
