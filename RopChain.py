@@ -20,6 +20,11 @@ class RopChain(object):
             self.append(chain)
         self.next_call = ropchain.next_call
 
+    def __add__(self, ropchain):
+        assert isinstance(ropchain, RopChain), "not RopChain instance"
+        self.merge_ropchain(ropchain)
+        return self
+
     def set_next_call(self, addr, type_val=0, comment=""):
         chain = Chain()
         chain.set_chain_values([ChainItem(addr, type_val, comment)])
