@@ -1,5 +1,5 @@
-# exrop
-Automatic ROP Chain Generation
+# Exrop
+Exrop is automatic ROP chains generator tool which can build gadget chain automatically from given binary and constraints
 
 Requirements : [Triton](https://github.com/JonathanSalwan/Triton), [ROPGadget](https://github.com/JonathanSalwan/ROPgadget)
 
