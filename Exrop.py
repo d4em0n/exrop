@@ -1,5 +1,6 @@
 from ChainBuilder import ChainBuilder
 from RopChain import RopChain
+from Gadget import TYPE_RETURN
 from os import popen
 import code
 
@@ -100,6 +101,9 @@ class Exrop(object):
     def syscall(self, sysnum, args, rwaddr=None):
         reg_used_syscall = set(["rax", "rdi", "rsi", "rdx", "r10", "r8", "r9"])
         args = (sysnum,) + args
-        syscall_addr = self.chain_builder.get_syscall_ret_addr(not_write_regs=reg_used_syscall)
-        assert syscall_addr,"can't find syscall; ret gadget!"
-        return self.func_call(syscall_addr.addr, args, rwaddr, convention="syscall_x86-64", type_val_addr=1, comment=str(syscall_addr))
+        syscall = self.chain_builder.get_syscall_addr(not_write_regs=reg_used_syscall)
+        assert syscall,"can't find syscall gadget!"
+        chain = self.func_call(syscall.addr, args, rwaddr, convention="syscall_x86-64", type_val_addr=1, comment=str(syscall))
+        if syscall.end_type != TYPE_RETURN:
+            chain.is_noreturn = True
+        return chain

@@ -12,8 +12,10 @@ class RopChain(object):
         self.payload = b""
         self.base_addr = 0
         self.next_call = None
+        self.is_noreturn = False
 
     def merge_ropchain(self, ropchain):
+        assert not self.is_noreturn, "can't merge ropchain, this chain is no-return"
         if self.next_call:
             self.append(self.next_call)
         for chain in ropchain.chains:

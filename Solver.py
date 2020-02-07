@@ -73,7 +73,8 @@ def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
             candidates.append(gadget)
     return candidates
 
-def findSyscallRet(gadgets, not_write_regs=set(), avoid_char=None):
+def findSyscall(gadgets, not_write_regs=set(), avoid_char=None):
+    syscall_noret = None
     for gadget in list(gadgets):
         badchar = False
         if avoid_char:
@@ -86,8 +87,13 @@ def findSyscallRet(gadgets, not_write_regs=set(), avoid_char=None):
             continue
         if isintersect(not_write_regs, gadget.written_regs):
             continue
-        if not gadget.is_memory_read and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.is_syscall:
-            return gadget
+
+        if not gadget.is_memory_read and not gadget.is_memory_write and gadget.is_syscall:
+            if gadget.end_type == TYPE_RETURN:
+                return gadget
+            syscall_noret = gadget
+
+    return syscall_noret
 
 def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=set(), avoid_char=None, cand_write_first=False):
     candidates_pop = []
