@@ -16,6 +16,7 @@ class RopChain(object):
 
     def merge_ropchain(self, ropchain):
         assert not self.is_noreturn, "can't merge ropchain, this chain is no-return"
+        assert isinstance(ropchain, RopChain), "not RopChain instance"
         if self.next_call:
             self.append(self.next_call)
         for chain in ropchain.chains:
@@ -23,7 +24,6 @@ class RopChain(object):
         self.next_call = ropchain.next_call
 
     def __add__(self, ropchain):
-        assert isinstance(ropchain, RopChain), "not RopChain instance"
         self.merge_ropchain(ropchain)
         return self
 
