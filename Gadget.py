@@ -93,7 +93,39 @@ class Gadget(object):
         self.insstr = str_ins
         self.insns = opcodes
 
+    def __getstate__(self):
+        newd = self.__dict__.copy()
+        # save all AstNode as string, because AstNode can't be pickled
+        oldRegAst = self.regAst
+        oldMemASt = self.memory_write_ast
+        oldEndAst = self.end_ast
+        oldPivotAst = self.pivot_ast
+
+        newRegAst = dict()
+        for reg,val in oldRegAst.items():
+            newRegAst[reg] = (str(val), val.getBitvectorSize())
+
+        newd['regAst'] = newRegAst
+
+        newMemAst = []
+        for addr,val in oldMemASt:
+            newMemAst.append((str(addr), str(val), val.getBitvectorSize()))
+        newd['memory_write_ast'] = newMemAst
+
+        if oldEndAst:
+            newd['end_ast'] = str(oldEndAst)
+
+        if oldPivotAst:
+            newd['pivot_ast'] = str(oldPivotAst)
+
+        newd['is_asted'] = False
+        return newd
+
+
     def buildAst(self):
+        if not self.is_analyzed:
+            return self.analyzeGadget()
+
         ctx = initialize()
         astCtxt = ctx.getAstContext()
         regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]

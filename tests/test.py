@@ -42,6 +42,7 @@ with open(sys.argv[1], "rb") as fp:
     chain_builder = ChainBuilder()
     chain_builder.load_list_gadget_string(gadgets)
     chain_builder.analyzeAll()
+    code.interact(local=locals())
 
     if "type" not in data_test or data_test['type'] == 'reg':
         test_reg(data_test)

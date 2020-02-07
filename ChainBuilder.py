@@ -1,7 +1,6 @@
 from Solver import *
 from Gadget import *
 from RopChain import *
-import copy
 
 class ChainBuilder(object):
     def __init__(self, gadgets=list()):
@@ -49,48 +48,7 @@ class ChainBuilder(object):
             gadget.analyzeGadget()
 
     def save_analyzed_gadgets(self):
-        gadgets = []
-        for old_gadget in self.gadgets:
-            # save state
-            oldRegAst = old_gadget.regAst
-            oldMemASt = old_gadget.memory_write_ast
-            oldEndAst = old_gadget.end_ast
-            oldPivotAst = old_gadget.pivot_ast
-
-
-            old_gadget.regAst = None
-            old_gadget.memory_write_ast = None
-            old_gadget.end_ast = None
-            old_gadget.pivot_ast = None
-
-            # ast node can't pickle, convert all to string
-            gadget = copy.deepcopy(old_gadget)
-            newRegAst = dict()
-            for reg,val in oldRegAst.items():
-                newRegAst[reg] = (str(val), val.getBitvectorSize())
-            gadget.regAst = newRegAst
-
-            newMemAst = []
-            for addr,val in oldMemASt:
-                newMemAst.append((str(addr), str(val), val.getBitvectorSize()))
-            gadget.memory_write_ast = newMemAst
-
-            if oldEndAst:
-                gadget.end_ast = str(oldEndAst)
-
-            if oldPivotAst:
-                gadget.pivot_ast = str(oldPivotAst)
-
-            gadget.is_asted = False
-            gadgets.append(gadget)
-
-            # reload state
-            old_gadget.regAst = oldRegAst
-            old_gadget.memory_write_ast = oldMemASt
-            old_gadget.end_ast = oldEndAst
-            old_gadget.pivot_ast = oldPivotAst
-
-        saved = pickle.dumps(gadgets)
+        saved = pickle.dumps(self.gadgets)
         return saved
 
     def load_analyzed_gadgets(self, pickled_data):
