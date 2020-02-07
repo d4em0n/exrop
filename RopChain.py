@@ -41,13 +41,15 @@ class RopChain(object):
         if intersect and len(self.chains) > 0:
             for i in range(len(self.chains)-1, -1, -1):
                 solved_before = set(self.get_solved_regs(0,i+1))
+                written_before = set(self.get_written_regs(0, i+1))
                 if isintersect(chain.solved_regs, self.chains[i].written_regs) and not isintersect(solved_before, chain.written_regs):
                     self.insert(i+1, chain)
                     break
 
-                regs_used_after = set(self.get_written_regs())
                 if i == 0:
-                    if not isintersect(chain.solved_regs, regs_used_after):
+                    regs_used_after = set(self.get_written_regs())
+                    depends_regs_after = set(self.get_depends_regs())
+                    if not isintersect(chain.solved_regs, regs_used_after) and not isintersect(chain.written_regs, depends_regs_after):
                         self.insert(0, chain)
                     else:
                         return False
@@ -68,6 +70,13 @@ class RopChain(object):
         for chain in chains:
             regs_written.update(chain.written_regs)
         return regs_written
+
+    def get_depends_regs(self, start_chain=None, end_chain=None):
+        regs_depends = set()
+        chains = self.chains[start_chain:end_chain]
+        for chain in chains:
+            regs_depends.update(chain.depends_regs)
+        return regs_depends
 
     def get_chains(self):
         chains = []
@@ -123,16 +132,18 @@ class Chain(object):
     def __init__(self):
         self.written_regs = set()
         self.solved_regs = set()
+        self.depends_regs = set()
         self.gadget = None
         self.chain_values = []
 
     def set_chain_values(self, chain_values):
         self.chain_values = chain_values
 
-    def set_solved(self, gadget, values, regs=set(), written_regs=set()):
+    def set_solved(self, gadget, values, regs=set(), written_regs=set(), depends_regs=set()):
         self.solved_regs.update(regs)
         self.written_regs.update(gadget.written_regs)
         self.written_regs.update(written_regs)
+        self.depends_regs.update(depends_regs)
         self.gadget = gadget
         depends_chain_values = []
         chain_values = [ChainItem(0)]*(gadget.diff_sp//8 + 1)
@@ -140,6 +151,7 @@ class Chain(object):
         for chain_item in values:
             if isinstance(chain_item, RopChain):
                 self.written_regs.update(chain_item.get_written_regs())
+                self.depends_regs.update(chain_item.get_depends_regs())
                 depends_chain_values += chain_item.get_chains()
                 continue
             if chain_item:

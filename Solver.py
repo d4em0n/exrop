@@ -215,7 +215,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
 
     for gadget in candidates:
         tmp_solved_ordered = []
-        tmp_solved_regs = []
+        tmp_solved_regs = set()
         tmp_solved_ordered2 = []
         if not gadget.is_asted:
             gadget.buildAst()
@@ -230,7 +230,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
 
             regAst = gadget.regAst[reg]
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
-                tmp_solved_regs.append(reg)
+                tmp_solved_regs.add(reg)
                 tmp_solved_ordered.append([])
                 if isinstance(val, str):
                     reg_to_reg_solve.add(val)
@@ -316,10 +316,10 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                         type_chain = CHAINITEM_TYPE_ADDR
                     hasil = ChainItem.parseFromModel(hasil, type_val=type_chain)
                     tmp_solved_ordered.append(hasil)
-                    tmp_solved_regs.append(reg)
+                    tmp_solved_regs.add(reg)
                 else:
                     if insert_tmp_solved(tmp_solved_ordered2, hasil):
-                        tmp_solved_regs.append(reg)
+                        tmp_solved_regs.add(reg)
 
         if not tmp_solved_regs:
             continue
@@ -331,9 +331,9 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
 #            print("handling no return gadget")
             diff = 0
             if gadget.end_type == TYPE_JMP_REG:
-                next_gadget = findForRet(candidates[:], 0, set(tmp_solved_regs), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 0, tmp_solved_regs, avoid_char=avoid_char)
             elif gadget.end_type == TYPE_CALL_REG:
-                next_gadget = findForRet(candidates[:], 8, set(tmp_solved_regs), avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 8, tmp_solved_regs, avoid_char=avoid_char)
                 diff = 8
             if not next_gadget:
                 continue
@@ -369,16 +369,20 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=set(), add_type=dic
                 insert_tmp_solved(tmp_solved_ordered2, hasil)
 
         tmp_solved_ordered.extend(tmp_solved_ordered2)
+        dep_regs = set()
+        if reg_to_reg_solve:
+            dep_regs = reg_to_reg_solve - tmp_solved_regs
 
         tmp_chain = Chain()
-        tmp_chain.set_solved(gadget, tmp_solved_ordered, tmp_solved_regs)
+        tmp_chain.set_solved(gadget, tmp_solved_ordered, tmp_solved_regs, depends_regs=dep_regs)
 
         if not chains.insert_chain(tmp_chain):
 #            print("failed insert")
             continue # can't insert chain
 
         for reg in tmp_solved_regs:
-            del solves[reg]
+            if reg in solves:
+                del solves[reg]
 
         if not solves:
             return chains
