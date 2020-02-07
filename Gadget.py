@@ -94,8 +94,11 @@ class Gadget(object):
         self.insns = opcodes
 
     def __getstate__(self):
-        newd = self.__dict__.copy()
+        if not self.is_asted:
+            return self.__dict__
+
         # save all AstNode as string, because AstNode can't be pickled
+        newd = self.__dict__.copy()
         oldRegAst = self.regAst
         oldMemASt = self.memory_write_ast
         oldEndAst = self.end_ast

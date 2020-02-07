@@ -1,6 +1,11 @@
 from Solver import *
 from Gadget import *
 from RopChain import *
+from multiprocessing import Pool
+
+def analyzeGadget(gadget):
+    gadget.analyzeGadget()
+    return gadget
 
 class ChainBuilder(object):
     def __init__(self, gadgets=list()):
@@ -43,9 +48,13 @@ class ChainBuilder(object):
         for addr,info in gadgets_dict.items():
             self.add_gadget_string(addr, info[0], info[1])
 
-    def analyzeAll(self):
-        for gadget in self.gadgets:
-            gadget.analyzeGadget()
+    def analyzeAll(self, num_process=1):
+        if num_process != 1:
+            p = Pool(num_process)
+            self.gadgets = p.map(analyzeGadget, self.gadgets)
+        else:
+            for gadget in self.gadgets:
+                gadget.analyzeGadget()
 
     def save_analyzed_gadgets(self):
         saved = pickle.dumps(self.gadgets)
