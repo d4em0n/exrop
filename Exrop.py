@@ -5,18 +5,28 @@ from os import popen
 import code
 
 def parseRopGadget(filename, opt=""):
-    cmd = 'ROPgadget {} --binary {} --multibr --only "pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|leave" --dump | tail -n +3 | head -n -2'.format(opt, filename)
-    with popen(cmd) as fp:
-        sample_gadgets = dict()
-        datas = fp.read().strip().split("\n")
-        datas.sort(key=len) # sort by length
-        for data in datas:
-            addr,insns = data.split(" : ")
-            insstr,opcode_hex = insns.split(" // ")
-            opcode = bytes.fromhex(opcode_hex)
-            addr = int(addr, 16)
+    from subprocess import Popen, PIPE, STDOUT
+    import re
+
+    cmd = ['ROPgadget', '--binary', filename, '--multibr', '--only',
+            'pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|leave', '--dump']
+    if opt:
+        cmd.append(opt)
+    process = Popen(cmd, stdout=PIPE, stderr=STDOUT)
+    stdout, _ = process.communicate()
+    output_lines = stdout.splitlines()
+    output_lines.sort(key=len)
+
+    sample_gadgets = dict()
+    regexp = re.compile(b"(0x.*) : (.*) // (.*)")
+    for line in output_lines:
+        match = regexp.match(line)
+        if match:
+            addr = int(match.group(1).decode(), 16)
+            insstr = match.group(2).decode()
+            opcode = bytes.fromhex(match.group(3).decode())
             sample_gadgets[addr] = (insstr,opcode)
-        return sample_gadgets
+    return sample_gadgets
 
 class Exrop(object):
     def __init__(self, binary):
