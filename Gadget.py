@@ -1,4 +1,5 @@
 from triton import *
+from numba import jit
 import code
 
 STACK = 0x7fffff00
@@ -278,21 +279,19 @@ class Gadget(object):
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.simplify(ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst(), True)
-            simplified = self.regAst[reg]
-            if str(simplified) in regs:
-                self.defined_regs[reg] = str(simplified)
-                continue
-            childs = simplified.getChildren()
-            if not childs and len(childs) != 2:
+            simplified = str(self.regAst[reg])
+            if simplified in regs:
+                self.defined_regs[reg] = simplified
                 continue
             try:
-                childs[1].getInteger()
-            except TypeError:
+                h = int(simplified, 16)
+                self.defined_regs[reg] = h
+            except ValueError:
                 continue
-            self.defined_regs[reg] = childs[0].getInteger()
+
         defregs = set(filter(lambda i: isinstance(self.defined_regs[i],int),
                               self.defined_regs.keys()))
-        self.depends_regs = set.difference(self.read_regs, defregs)
+        self.depends_regs = self.read_regs - defregs
 
         self.diff_sp = sp - STACK
         self.is_analyzed = True

@@ -52,7 +52,7 @@ def findForRet(gadgets, min_diff_sp=0, not_write_regs=set(), avoid_char=None):
             continue
         if isintersect(not_write_regs, gadget.written_regs):
             continue
-        if not gadget.is_memory_read and not gadget.is_memory_write and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
+        if not gadget.is_memory_read and not gadget.is_memory_write and not gadget.is_syscall and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
             return gadget
 
 def findPivot(gadgets, not_write_regs=set(), avoid_char=None):
