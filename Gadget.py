@@ -1,6 +1,4 @@
 from triton import *
-from numba import jit
-import code
 
 STACK = 0x7fffff00
 MAX_FILL_STACK = 128
