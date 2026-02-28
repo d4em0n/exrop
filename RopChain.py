@@ -1,9 +1,5 @@
-def isintersect(a,b):
-    for i in a:
-        for j in b:
-            if i==j:
-                return True
-    return False
+def isintersect(a, b):
+    return not a.isdisjoint(b)
 
 class RopChain(object):
     def __init__(self):
@@ -146,7 +142,13 @@ class Chain(object):
     def set_chain_values(self, chain_values):
         self.chain_values = chain_values
 
-    def set_solved(self, gadget, values, regs=set(), written_regs=set(), depends_regs=set()):
+    def set_solved(self, gadget, values, regs=None, written_regs=None, depends_regs=None):
+        if regs is None:
+            regs = set()
+        if written_regs is None:
+            written_regs = set()
+        if depends_regs is None:
+            depends_regs = set()
         self.solved_regs.update(regs)
         self.written_regs.update(gadget.written_regs)
         self.written_regs.update(written_regs)
