@@ -52,13 +52,13 @@ def regx86_64(reg):
 class Gadget(object):
     def __init__(self, addr):
         self.addr = addr
-        self.written_regs = set() # register yang telah tertulis
-        self.read_regs = set() # register yang telah terbaca
-        self.popped_regs = set() # register dari hasil `pop reg`
-        self.depends_regs = set() # `mov rax, rbx; ret` gadget ini akan bergantung pada rbx
-        self.defined_regs = dict() # register yang telah terdefinisi konstanta `xor rax, rax; ret`
+        self.written_regs = set() # registers written by this gadget
+        self.read_regs = set() # registers read by this gadget
+        self.popped_regs = set() # registers set via `pop reg`
+        self.depends_regs = set() # registers this gadget depends on (e.g. `mov rax, rbx; ret` depends on rbx)
+        self.defined_regs = dict() # registers defined to a constant (e.g. `xor rax, rax; ret`)
         self.regAst = dict()
-        self.diff_sp = 0 # jarak rsp ke rbp sesaaat sebelum ret
+        self.diff_sp = 0 # stack pointer delta before ret
         self.is_analyzed = False
         self.is_asted = False
         self.insstr = ""
@@ -79,107 +79,53 @@ class Gadget(object):
         if self.end_gadget:
             append_com = ": next -> (0x{:08x}) # {}".format(self.end_gadget.addr, self.end_gadget)
         return self.insstr + append_com
-#        return "addr : {}\nwritten : {}\nread : {}\npopped : {}\ndepends : {}\ndiff_sp: {}".format(self.addr, self.written_regs, self.read_regs, self.popped_regs, self.depends_regs, self.diff_sp)
 
     def __str__(self):
         append_com = ""
         if self.end_gadget:
             append_com = ": next -> (0x{:08x}) # {}".format(self.end_gadget.addr, self.end_gadget)
         return self.insstr + append_com
-#        return "addr : {}\nwritten : {}\nread : {}\npopped : {}\ndepends : {}\ndiff_sp: {}\n".format(self.addr, self.written_regs, self.read_regs, self.popped_regs, self.depends_regs, self.diff_sp)
 
     def loadFromString(self, str_ins, opcodes):
         self.insstr = str_ins
         self.insns = opcodes
 
+    def __copy__(self):
+        # Shallow copy that preserves AST references (unlike pickle which strips them)
+        new = Gadget.__new__(Gadget)
+        new.__dict__.update(self.__dict__)
+        return new
+
     def __getstate__(self):
-        if not self.is_asted:
-            return self.__dict__
-
-        # save all AstNode as string, because AstNode can't be pickled
+        # AstNode objects can't be pickled, so strip them and mark for re-analysis
         newd = self.__dict__.copy()
-        oldRegAst = self.regAst
-        oldMemASt = self.memory_write_ast
-        oldEndAst = self.end_ast
-        oldPivotAst = self.pivot_ast
-
-        newRegAst = dict()
-        for reg,val in oldRegAst.items():
-            newRegAst[reg] = (str(val), val.getBitvectorSize())
-
-        newd['regAst'] = newRegAst
-
-        newMemAst = []
-        for addr,val in oldMemASt:
-            newMemAst.append((str(addr), str(val), val.getBitvectorSize()))
-        newd['memory_write_ast'] = newMemAst
-
-        if oldEndAst:
-            newd['end_ast'] = str(oldEndAst)
-
-        if oldPivotAst:
-            newd['pivot_ast'] = str(oldPivotAst)
-
+        newd['regAst'] = dict()
+        newd['memory_write_ast'] = []
+        newd['end_ast'] = None
+        newd['pivot_ast'] = None
         newd['is_asted'] = False
         return newd
 
-
     def buildAst(self):
-        if not self.is_analyzed:
-            return self.analyzeGadget()
-
-        ctx = initialize()
-        astCtxt = ctx.getAstContext()
-        regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
-
-        for reg in regs:
-            svar = ctx.newSymbolicVariable(64)
-            svar.setAlias(reg)
-            locals()[reg] = astCtxt.variable(svar)
-        ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
-
-        diff_sp = self.diff_sp//8
-        if diff_sp > MAX_FILL_STACK or diff_sp < 0:
-            diff_sp = MAX_FILL_STACK
-
-        for i in range(diff_sp):
-            alias = "STACK"+str(i)
-            svar = ctx.newSymbolicVariable(64)
-            svar.setAlias(alias)
-            locals()[alias] = astCtxt.variable(svar)
-
-        BSIZE = 8 # default for now
-
-        variables = ctx.getSymbolicVariables()
-        for i,var in variables.items(): # get all symbolic variable for the next eval
-            locals()[var.getAlias()] = astCtxt.variable(var)
-
-        newRegAst = dict()
-        for regname,ast in self.regAst.items():
-            val = eval(ast[0])
-            if isinstance(val, int):
-                val = astCtxt.bv(val, ast[1])
-            newRegAst[regname] = val # eval-ing ast symbolic python expressions
-        self.regAst = newRegAst
-
-        new_mem_ast = []
-        for addr_ast,val_ast,sz_val in self.memory_write_ast:
-            val = eval(val_ast)
-            if isinstance(val, int):
-                val = astCtxt.bv(val, sz_val)
-            addr = eval(addr_ast)
-            if isinstance(val, int):
-                addr = astCtxt.bv(addr, BSIZE)
-            new_mem_ast.append((addr, val))
-        self.memory_write_ast = new_mem_ast
-
-        if self.pivot_ast:
-            self.pivot_ast = eval(self.pivot_ast)
-
-        if self.end_ast:
-            self.end_ast = eval(self.end_ast)
-
-        self.is_asted = True
+        # Re-analyze the gadget to rebuild AST nodes (safe alternative to eval)
+        self.written_regs = set()
+        self.read_regs = set()
+        self.popped_regs = set()
+        self.depends_regs = set()
+        self.defined_regs = dict()
+        self.regAst = dict()
+        self.is_memory_write = 0
+        self.is_memory_read = 0
+        self.memory_write_ast = []
+        self.end_type = TYPE_UNKNOWN
+        self.end_ast = None
+        self.end_reg_used = set()
+        self.pivot = 0
+        self.pivot_ast = None
+        self.is_syscall = False
+        self.is_analyzed = False
+        self.is_asted = False
+        self.analyzeGadget()
 
 
     def analyzeGadget(self, debug=False):
@@ -249,7 +195,6 @@ class Gadget(object):
                     type_end = TYPE_UNKNOWN
                 self.end_type = type_end
                 self.end_reg_used = tmp_red
-#                code.interact(local=locals())
                 break
 
             elif inst.getDisassembly() in syscalls:

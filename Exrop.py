@@ -1,8 +1,6 @@
 from ChainBuilder import ChainBuilder
 from RopChain import RopChain
 from Gadget import TYPE_RETURN
-from os import popen
-import code
 
 def parseRopGadget(filename, opt=""):
     from subprocess import Popen, PIPE, STDOUT
@@ -33,7 +31,7 @@ class Exrop(object):
         self.binary = binary
         self.chain_builder = ChainBuilder()
 
-    def find_gadgets(self, cache=False, add_opt="", num_process=1):
+    def find_gadgets(self, cache=False, add_opt="", num_process=None):
         if cache:
             fcname = "./{}.exrop_cache".format(self.binary.replace("/", "_"))
             try:
@@ -42,17 +40,14 @@ class Exrop(object):
                     self.chain_builder.load_analyzed_gadgets(objpic)
                     return
             except FileNotFoundError:
-                fc = open(fcname, "wb")
+                pass
         gadgets = parseRopGadget(self.binary, add_opt)
         self.chain_builder.load_list_gadget_string(gadgets)
         self.chain_builder.analyzeAll(num_process)
         if cache:
             objpic = self.chain_builder.save_analyzed_gadgets()
-            fc.write(objpic)
-            fc.close()
-
-    def load_raw_gadgets(self, gadgets):
-        pass
+            with open(fcname, "wb") as fc:
+                fc.write(objpic)
 
     def stack_pivot(self, addr, avoid_char=None):
         self.chain_builder.solve_pivot(addr, avoid_char)
