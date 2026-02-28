@@ -1,3 +1,6 @@
+import os
+import sys
+import pickle
 from Solver import *
 from Gadget import *
 from RopChain import *
@@ -8,8 +11,8 @@ def analyzeGadget(gadget):
     return gadget
 
 class ChainBuilder(object):
-    def __init__(self, gadgets=list()):
-        self.gadgets = gadgets
+    def __init__(self, gadgets=None):
+        self.gadgets = gadgets if gadgets is not None else []
         self.regs = dict()
         self.raw_chain = None
 
@@ -19,7 +22,7 @@ class ChainBuilder(object):
     def set_regs(self, regs):
         self.regs = regs
 
-    def get_syscall_addr(self, not_write_regs=set(), avoid_char=None):
+    def get_syscall_addr(self, not_write_regs=None, avoid_char=None):
         return findSyscall(self.gadgets.copy(), not_write_regs, avoid_char=avoid_char)
 
     def set_writes(self, writes):
@@ -48,13 +51,41 @@ class ChainBuilder(object):
         for addr,info in gadgets_dict.items():
             self.add_gadget_string(addr, info[0], info[1])
 
-    def analyzeAll(self, num_process=1):
-        if num_process != 1:
+    def _progress(self, done, total):
+        if total < 50:
+            return
+        pct = done * 100 // total
+        bar = '#' * (pct // 5) + '-' * (20 - pct // 5)
+        sys.stderr.write(f'\r  analyzing gadgets [{bar}] {done}/{total} ({pct}%)')
+        sys.stderr.flush()
+
+    def _clear_progress(self, total):
+        if total >= 50:
+            sys.stderr.write('\r' + ' ' * 60 + '\r')
+            sys.stderr.flush()
+
+    def analyzeAll(self, num_process=None):
+        total = len(self.gadgets)
+        if num_process is None:
+            num_process = os.cpu_count() or 1
+        if num_process > 1 and total > 1:
             p = Pool(num_process)
-            self.gadgets = p.map(analyzeGadget, self.gadgets)
+            results = []
+            for i, gadget in enumerate(p.imap_unordered(analyzeGadget, self.gadgets), 1):
+                results.append(gadget)
+                if i % 100 == 0 or i == total:
+                    self._progress(i, total)
+            p.close()
+            p.join()
+            # Preserve original order by address
+            by_addr = {g.addr: g for g in results}
+            self.gadgets = [by_addr[g.addr] for g in self.gadgets]
         else:
-            for gadget in self.gadgets:
+            for i, gadget in enumerate(self.gadgets):
                 gadget.analyzeGadget()
+                if (i % 100 == 0 or i == total - 1):
+                    self._progress(i + 1, total)
+        self._clear_progress(total)
 
     def save_analyzed_gadgets(self):
         saved = pickle.dumps(self.gadgets)
