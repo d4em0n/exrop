@@ -2,7 +2,7 @@ from pwn import *
 import time
 from Exrop import Exrop
 
-binname = "libc.so.6"
+binname = "/lib/x86_64-linux-gnu/libc.so.6"
 libc = ELF(binname, checksec=False)
 open = libc.symbols['open']
 read = libc.symbols['read']
