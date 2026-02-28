@@ -1,0 +1,12 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        0x4000: 'lea rsp, [rdi+0x20]; ret',
+    },
+    "find": "rdi",
+    "expect": {
+        "pivot_type": "offset",
+        "src_reg": "rdi",
+        "offset": 0x20
+    }
+}
