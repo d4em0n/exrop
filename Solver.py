@@ -277,7 +277,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
                 tmp_for_refind = for_refind.copy()
                 tmp_for_refind.add((reg, val))
                 reg_refind.update(set(list(refind_dict.keys())))
-                result = solveGadgets(candidates[:], refind_dict, avoid_char, for_refind=tmp_for_refind, rec_limit=rec_limit+1)
+                result = solveGadgets(candidates[:], refind_dict, avoid_char, keep_regs=keep_regs, for_refind=tmp_for_refind, rec_limit=rec_limit+1)
 
             if result:
                 if isinstance(val, str):
@@ -301,10 +301,11 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
                 continue
             next_gadget = None
             diff = 0
+            not_write = tmp_solved_regs | keep_regs
             if gadget.end_type == TYPE_JMP_REG:
-                next_gadget = findForRet(candidates[:], 0, tmp_solved_regs, avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 0, not_write, avoid_char=avoid_char)
             elif gadget.end_type == TYPE_CALL_REG:
-                next_gadget = findForRet(candidates[:], 8, tmp_solved_regs, avoid_char=avoid_char)
+                next_gadget = findForRet(candidates[:], 8, not_write, avoid_char=avoid_char)
                 diff = 8
             if not next_gadget:
                 continue
@@ -332,7 +333,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
             if refind_dict:
                 reg_to_reg_solve.update(tmp_solved_regs)
                 reg_to_reg_solve.update(reg_refind)
-                result = solveGadgets(gadgets, refind_dict, avoid_char, add_type=type_chains, keep_regs=reg_to_reg_solve, rec_limit=rec_limit+1)
+                result = solveGadgets(gadgets, refind_dict, avoid_char, add_type=type_chains, keep_regs=reg_to_reg_solve | keep_regs, rec_limit=rec_limit+1)
             if not result:
                 continue
             if not isinstance(result, RopChain):
@@ -362,6 +363,91 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
 
     return []
 
+def _resolve_write_operand(ctx, operand_ast, target, regs, refind_dict):
+    """Resolve one side (addr or val) of a write gadget.
+
+    target is either an int (constant) or a str (register name).
+    Returns True on success, False on failure.  On success, any register
+    dependencies are added to refind_dict.
+    """
+    if isinstance(target, str) and target in regs:
+        # Register-based operand
+        ast_str = str(operand_ast)
+        if ast_str == target:
+            return True  # direct match, nothing to solve
+        if ast_str in regs:
+            # Gadget uses a different register — need reg-to-reg forwarding
+            if ast_str in refind_dict and refind_dict[ast_str] != target:
+                return False  # conflict
+            refind_dict[ast_str] = target
+            return True
+        return False  # complex AST expression, can't handle
+    else:
+        # Constant operand — solve via SMT model
+        model = list(ctx.getModel(operand_ast == target).values())
+        if not model:
+            return False
+        for v in model:
+            alias = v.getVariable().getAlias()
+            if 'STACK' not in alias:
+                if alias in regs and alias not in refind_dict:
+                    refind_dict[alias] = v.getValue()
+                else:
+                    return False
+        return True
+
+def _try_write_gadgets(gadgets, candidates_list, solves, regs, ctx, chains, fwd_level, avoid_char=None):
+    """Try to solve write gadgets with increasing forwarding tolerance.
+
+    fwd_level controls how much forwarding is allowed:
+      0 = no forwarding (both addr and val must resolve without reg-to-reg)
+      1 = one side can need reg-to-reg forwarding (the other must be direct/const)
+      2 = both sides can need reg-to-reg forwarding
+    """
+    for gadget in candidates_list:
+        # Only use gadgets that end with ret
+        if gadget.end_type != TYPE_RETURN:
+            continue
+        if not gadget.is_asted:
+            gadget.buildAst()
+        for addr, val in list(solves.items()):
+            mem_ast = gadget.memory_write_ast[0]
+            if mem_ast[1].getBitvectorSize() != 64:
+                break
+
+            refind_dict_addr = {}
+            if not _resolve_write_operand(ctx, mem_ast[0], addr, regs, refind_dict_addr):
+                break
+            refind_dict_val = {}
+            if not _resolve_write_operand(ctx, mem_ast[1], val, regs, refind_dict_val):
+                break
+
+            # Count how many sides need reg-to-reg forwarding
+            addr_fwd = any(isinstance(v, str) for v in refind_dict_addr.values())
+            val_fwd = any(isinstance(v, str) for v in refind_dict_val.values())
+            fwd_count = int(addr_fwd) + int(val_fwd)
+            if fwd_count > fwd_level:
+                break
+
+            refind_dict = {**refind_dict_addr, **refind_dict_val}
+            result = True
+            if refind_dict:
+                # Protect register operands from being clobbered by the refind solve
+                keep = set()
+                if isinstance(addr, str) and addr in regs:
+                    keep.add(addr)
+                if isinstance(val, str) and val in regs:
+                    keep.add(val)
+                result = solveGadgets(gadgets[:], refind_dict, avoid_char=avoid_char, keep_regs=keep)
+            if result:
+                del solves[addr]
+                chain = Chain()
+                chain.set_solved(gadget, [result] if isinstance(result, (list, RopChain)) else [])
+                chains.insert_chain(chain)
+                if not solves:
+                    return True
+    return False
+
 def solveWriteGadgets(gadgets, solves, avoid_char=None):
     # Work on a copy so partial failures don't corrupt the caller's dict
     solves = dict(solves)
@@ -372,37 +458,17 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
     gwr = list(candidates.keys())
     chains = RopChain()
     gwr.sort()
-    for w in gwr:
-        for gadget in candidates[w]:
-            if not gadget.is_asted:
-                gadget.buildAst()
-            for addr, val in list(solves.items()):
-                mem_ast = gadget.memory_write_ast[0]
-                if mem_ast[1].getBitvectorSize() != 64:
-                    break
-                addr_result = ctx.getModel(mem_ast[0] == addr).values()
-                val_result = ctx.getModel(mem_ast[1] == val).values()
-                if not addr_result or not val_result:
-                    break
-                result = list(addr_result) + list(val_result)
-                refind_dict = {}
-                for v in result:
-                    alias = v.getVariable().getAlias()
-                    if 'STACK' not in alias:
-                        if alias in regs and alias not in refind_dict:
-                            refind_dict[alias] = v.getValue()
-                        else:
-                            result = False
-                            break
-                if result and refind_dict:
-                    result = solveGadgets(gadgets[:], refind_dict, avoid_char=avoid_char)
-                if result:
-                    del solves[addr]
-                    chain = Chain()
-                    chain.set_solved(gadget, [result])
-                    chains.insert_chain(chain)
-                    if not solves:
-                        return chains
+
+    # Progressive passes with increasing forwarding tolerance:
+    #   0: no forwarding (both sides direct/const-solvable)
+    #   1: one side can need reg-to-reg forwarding
+    #   2: both sides can need reg-to-reg forwarding
+    for level in range(3):
+        if not solves:
+            break
+        for w in gwr:
+            if _try_write_gadgets(gadgets, candidates[w], solves, regs, ctx, chains, fwd_level=level, avoid_char=avoid_char):
+                return chains
 
 def solvePivot(gadgets, addr_pivot, avoid_char=None):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
