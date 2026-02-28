@@ -1,0 +1,10 @@
+{
+    "type": "write_mem",
+    "gadgets": {
+        0x1000: 'mov qword ptr [rdi], rdx; ret',
+        0x2000: 'mov rdx, rcx; ret',
+    },
+    "find": {
+        "rdi": "rcx",
+    }
+}
