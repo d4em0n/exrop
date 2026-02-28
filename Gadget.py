@@ -1,3 +1,4 @@
+import re
 from triton import *
 
 STACK = 0x7fffff00
@@ -23,6 +24,43 @@ TYPE_JMP_MEM = 2
 TYPE_CALL_REG = 3
 TYPE_CALL_MEM = 4
 TYPE_UNKNOWN = 5
+
+GP_REGS = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp",
+           "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+
+def _extract_reg_offset(ast_str):
+    """Extract (register_name, offset) from a simplified Triton pivot AST string.
+
+    Examples:
+        "rdi"                                      -> ("rdi", 0)
+        "((0x20 + rdi) & 0xffffffffffffffff)"      -> ("rdi", 0x20)
+        "((rdi + 0x20) & 0xffffffffffffffff)"      -> ("rdi", 0x20)
+        "((rdi - 0x8) & 0xffffffffffffffff)"       -> ("rdi", -8)
+    """
+    s = ast_str.strip()
+    if s in GP_REGS:
+        return s, 0
+
+    # Strip outer ((...) & 0xffffffffffffffff) mask
+    m = re.match(r'^\(\((.+)\) & 0xffffffffffffffff\)$', s)
+    inner = m.group(1).strip() if m else s.strip('()')
+
+    if inner in GP_REGS:
+        return inner, 0
+
+    # Try: "const + reg" or "reg + const"
+    for reg in GP_REGS:
+        m = re.match(r'^(0x[0-9a-fA-F]+|\d+)\s*\+\s*' + re.escape(reg) + r'$', inner)
+        if m:
+            return reg, int(m.group(1), 0)
+        m = re.match(r'^' + re.escape(reg) + r'\s*\+\s*(0x[0-9a-fA-F]+|\d+)$', inner)
+        if m:
+            return reg, int(m.group(1), 0)
+        m = re.match(r'^' + re.escape(reg) + r'\s*-\s*(0x[0-9a-fA-F]+|\d+)$', inner)
+        if m:
+            return reg, -int(m.group(1), 0)
+
+    return None, 0
 
 def regx86_64(reg):
     regs = {
@@ -72,6 +110,10 @@ class Gadget(object):
         self.end_reg_used = set() # register used in end_ast
         self.pivot = 0
         self.pivot_ast = None
+        self.pivot_indirect = 0   # 1 if rsp loaded from memory at symbolic addr
+        self.pivot_mem_ast = None  # AST of the memory address for indirect pivot
+        self.pivot_src_reg = None  # source register name for pivot ('rdi', 'rsi', etc.)
+        self.pivot_offset = 0     # offset from src_reg
         self.is_syscall = False
 
     def __repr__(self):
@@ -103,6 +145,7 @@ class Gadget(object):
         newd['memory_write_ast'] = []
         newd['end_ast'] = None
         newd['pivot_ast'] = None
+        newd['pivot_mem_ast'] = None
         newd['is_asted'] = False
         return newd
 
@@ -122,11 +165,59 @@ class Gadget(object):
         self.end_reg_used = set()
         self.pivot = 0
         self.pivot_ast = None
+        self.pivot_indirect = 0
+        self.pivot_mem_ast = None
+        self.pivot_src_reg = None
+        self.pivot_offset = 0
         self.is_syscall = False
         self.is_analyzed = False
         self.is_asted = False
         self.analyzeGadget()
 
+
+    def _detect_indirect_pivot(self, indirect_loads, regs):
+        """Re-execute gadget with symbolized memory at indirect load sites to detect Type 3 pivots."""
+        ctx = initialize()
+        astCtxt = ctx.getAstContext()
+        for reg in regs:
+            symbolizeReg(ctx, reg)
+        ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
+        for i in range(MAX_FILL_STACK):
+            tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
+            tmpb.setAlias("STACK{}".format(i))
+
+        # Symbolize memory at the indirect load addresses
+        for idx, (concrete_addr, _, size) in enumerate(indirect_loads):
+            sym = ctx.symbolizeMemory(MemoryAccess(concrete_addr, size))
+            sym.setAlias("PIVOTMEM{}".format(idx))
+
+        # Re-execute
+        pc = 0
+        while True:
+            inst = Instruction()
+            inst.setOpcode(self.insns[pc:pc+16])
+            inst.setAddress(pc)
+            ctx.processing(inst)
+            if inst.isControlFlow():
+                break
+            pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
+            if pc >= len(self.insns):
+                break
+
+        if ctx.isRegisterSymbolized(ctx.registers.rsp):
+            rsp_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
+            adjusted = ctx.simplify(astCtxt.bvsub(rsp_ast, astCtxt.bv(8, 64)), True)
+            # Find which PIVOTMEM variable appears in the rsp AST
+            childs = astCtxt.search(adjusted, AST_NODE.VARIABLE)
+            for c in childs:
+                alias = c.getSymbolicVariable().getAlias()
+                if alias.startswith("PIVOTMEM"):
+                    idx = int(alias.replace("PIVOTMEM", ""))
+                    _, lea_ast, _ = indirect_loads[idx]
+                    self.pivot_indirect = 1
+                    self.pivot_mem_ast = lea_ast
+                    self.pivot_src_reg, self.pivot_offset = _extract_reg_offset(str(lea_ast))
+                    break
 
     def analyzeGadget(self, debug=False):
         BSIZE = 8
@@ -146,6 +237,7 @@ class Gadget(object):
         sp = STACK
         instructions = self.insns
         pc = 0
+        indirect_load_candidates = []  # (concrete_addr, lea_ast, size) for indirect pivot detection
 
         while True:
             inst = Instruction()
@@ -202,6 +294,17 @@ class Gadget(object):
 
             if not pop and inst.isMemoryRead():
                 self.is_memory_read = 1
+                # Track loads from symbolic (register-derived) addresses for indirect pivot detection
+                for load_access in inst.getLoadAccess():
+                    mem_acc = load_access[0]
+                    lea_ast = mem_acc.getLeaAst()
+                    if lea_ast is not None:
+                        childs = astCtxt.search(lea_ast, AST_NODE.VARIABLE)
+                        has_reg = any(c.getSymbolicVariable().getAlias() in regs for c in childs)
+                        if has_reg:
+                            concrete_addr = mem_acc.getAddress()
+                            if not (STACK <= concrete_addr < STACK + MAX_FILL_STACK * 8):
+                                indirect_load_candidates.append((concrete_addr, ctx.simplify(lea_ast, True), mem_acc.getSize()))
 
             if inst.isMemoryWrite() and 'mov' in inst.getDisassembly():
                 for store_access in inst.getStoreAccess():
@@ -219,6 +322,9 @@ class Gadget(object):
             self.pivot_ast = ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rsp).getAst() - 8, True)
             if self.pivot_ast:
                 self.pivot = 1
+                self.pivot_src_reg, self.pivot_offset = _extract_reg_offset(str(self.pivot_ast))
+        elif indirect_load_candidates:
+            self._detect_indirect_pivot(indirect_load_candidates, regs)
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.simplify(ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst(), True)

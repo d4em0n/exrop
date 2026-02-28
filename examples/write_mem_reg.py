@@ -47,6 +47,7 @@ tests = [
     # --- both sides forwarded ---
     ("*(rcx) = rbx",                 {"rcx": "rbx"}),
     ("*(rbx) = rcx",                 {"rbx": "rcx"}),
+    ("*(r15) = rcx",                 {"r15": "rcx"}),
 
     # --- multi-write ---
     ("*(0x414141)=rax + *(rdi)=0xBB", {0x414141: "rax", "rdi": 0xbbbbbbbb}),

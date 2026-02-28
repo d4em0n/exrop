@@ -1,0 +1,10 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        0x4000: 'xchg rdi, rsp; ret',
+        0x5000: 'lea rsp, [rdi+0x20]; ret',
+        0x6000: 'mov rsp, qword ptr [rdi+0x10]; ret',
+    },
+    "find": "rdi",
+    "expect_count": 3
+}
