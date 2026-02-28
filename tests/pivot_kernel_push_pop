@@ -1,0 +1,12 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        0x4000: 'push rsi; pop rsp; ret',
+    },
+    "find": "rsi",
+    "expect": {
+        "pivot_type": "direct",
+        "src_reg": "rsi",
+        "offset": 0
+    }
+}

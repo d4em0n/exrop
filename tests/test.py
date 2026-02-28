@@ -47,6 +47,9 @@ def load_and_run(test_name):
         chain_builder.solve_chain_write(avoid_char=avoid_char)
     elif test_type == 'pivot':
         chain_builder.solve_pivot(data_test['find'], avoid_char=avoid_char)
+    elif test_type == 'pivot_reg':
+        results = chain_builder.solve_pivot_reg(data_test['find'], avoid_char=avoid_char)
+        return results  # returns list of PivotInfo, not a RopChain
 
     return chain_builder.build_chain()
 
@@ -57,13 +60,34 @@ EXPECTED_FAIL = {"invalid_no_return", "syscall"}
 @pytest.mark.parametrize("test_name", discover_test_files())
 @pytest.mark.timeout(30)
 def test_gadget_chain(test_name):
-    chain = load_and_run(test_name)
-    if test_name in EXPECTED_FAIL:
-        assert chain is None or chain == [], f"Expected no chain for {test_name}, but got one"
+    result = load_and_run(test_name)
+
+    # Load test data to check type and expectations
+    path = os.path.join(TESTS_DIR, test_name)
+    with open(path, "rb") as fp:
+        data_test = eval(fp.read())
+    test_type = data_test.get('type', 'reg')
+
+    if test_type == 'pivot_reg':
+        assert isinstance(result, list), f"Expected list of PivotInfo for {test_name}"
+        assert len(result) > 0, f"No pivot found for {test_name}"
+        expect = data_test.get('expect')
+        if expect:
+            pivot = result[0]
+            assert pivot.pivot_type == expect['pivot_type'], f"Expected type {expect['pivot_type']}, got {pivot.pivot_type}"
+            assert pivot.src_reg == expect['src_reg'], f"Expected src_reg {expect['src_reg']}, got {pivot.src_reg}"
+            assert pivot.offset == expect['offset'], f"Expected offset {expect['offset']}, got {pivot.offset}"
+            pivot.dump()
+        if 'expect_count' in data_test:
+            assert len(result) >= data_test['expect_count'], f"Expected {data_test['expect_count']} pivots, got {len(result)}"
+            for p in result:
+                p.dump()
+    elif test_name in EXPECTED_FAIL:
+        assert result is None or result == [], f"Expected no chain for {test_name}, but got one"
     else:
-        assert chain is not None, f"No chain found for {test_name}"
-        assert len(chain.get_chains()) > 0, f"Empty chain for {test_name}"
-        chain.dump()
+        assert result is not None, f"No chain found for {test_name}"
+        assert len(result.get_chains()) > 0, f"Empty chain for {test_name}"
+        result.dump()
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):

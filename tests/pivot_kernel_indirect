@@ -1,0 +1,12 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        0x4000: 'mov rsp, qword ptr [rdi+0x10]; ret',
+    },
+    "find": "rdi",
+    "expect": {
+        "pivot_type": "indirect",
+        "src_reg": "rdi",
+        "offset": 0x10
+    }
+}

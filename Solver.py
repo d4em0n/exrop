@@ -470,6 +470,45 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
             if _try_write_gadgets(gadgets, candidates[w], solves, regs, ctx, chains, fwd_level=level, avoid_char=avoid_char):
                 return chains
 
+def findPivotForReg(gadgets, src_reg, avoid_char=None):
+    """Find pivot gadgets that redirect rsp from a specific register.
+
+    Only accepts gadgets ending with ret. Gadgets ending with jmp/call
+    to a constant address are excluded (JOP chaining not yet supported).
+
+    Returns list of (gadget, offset, is_indirect) tuples, sorted by
+    preference: direct offset=0 first, then small offsets, then indirect.
+    """
+    candidates = []
+    for gadget in gadgets:
+        if avoid_char and _has_badchar(gadget.addr, avoid_char):
+            continue
+        if gadget.end_type != TYPE_RETURN:
+            continue
+        if gadget.pivot and getattr(gadget, 'pivot_src_reg', None) == src_reg:
+            candidates.append((gadget, getattr(gadget, 'pivot_offset', 0), False))
+        elif getattr(gadget, 'pivot_indirect', 0) and getattr(gadget, 'pivot_src_reg', None) == src_reg:
+            candidates.append((gadget, getattr(gadget, 'pivot_offset', 0), True))
+    candidates.sort(key=lambda x: (x[2], abs(x[1])))
+    return candidates
+
+def solvePivotForReg(gadgets, src_reg, avoid_char=None):
+    """Find kernel-style pivot gadgets that set rsp from a register.
+
+    For kernel exploits where the register is already set by the caller.
+    No SMT solving needed — we just find matching pivot gadgets.
+
+    Returns a list of PivotInfo objects sorted by preference.
+    """
+    from RopChain import PivotInfo
+
+    candidates = findPivotForReg(gadgets, src_reg, avoid_char=avoid_char)
+    results = []
+    for gadget, offset, is_indirect in candidates:
+        info = PivotInfo(gadget, src_reg, offset, is_indirect)
+        results.append(info)
+    return results
+
 def solvePivot(gadgets, addr_pivot, avoid_char=None):
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
     candidates = findPivot(gadgets, avoid_char=avoid_char)

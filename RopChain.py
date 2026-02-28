@@ -1,5 +1,93 @@
+import struct
+
 def isintersect(a, b):
     return not a.isdisjoint(b)
+
+
+class PivotInfo(object):
+    """Result of a kernel-style pivot gadget search.
+
+    Attributes:
+        gadget_addr: Address of the pivot gadget (for the hijacked function pointer).
+        gadget: The Gadget object.
+        src_reg: Register the pivot reads from (e.g., 'rdi').
+        offset: Offset from src_reg where pivot reads/starts.
+        is_indirect: True if pivot loads rsp from memory (Type 3).
+        pivot_type: 'direct', 'offset', or 'indirect'.
+    """
+
+    def __init__(self, gadget, src_reg, offset=0, is_indirect=False):
+        self.gadget_addr = gadget.addr
+        self.gadget = gadget
+        self.src_reg = src_reg
+        self.offset = offset
+        self.is_indirect = is_indirect
+
+        if is_indirect:
+            self.pivot_type = 'indirect'
+        elif offset != 0:
+            self.pivot_type = 'offset'
+        else:
+            self.pivot_type = 'direct'
+
+    def dump(self):
+        print("Pivot type: {}".format(self.pivot_type))
+        print("  Gadget: 0x{:016x} # {}".format(self.gadget_addr, self.gadget))
+        print("  Source register: {}".format(self.src_reg))
+        if self.offset:
+            print("  Offset: 0x{:x}".format(self.offset))
+        if self.is_indirect:
+            print("  Place ROP chain address at [{}+0x{:x}]".format(self.src_reg, self.offset))
+        elif self.offset:
+            print("  ROP chain starts at [{}+0x{:x}]".format(self.src_reg, self.offset))
+        else:
+            print("  ROP chain starts at [{}]".format(self.src_reg))
+
+    def build_payload(self, rop_chain, obj_size=0x100):
+        """Build exploit object layout with the ROP chain placed at the correct offset.
+
+        Args:
+            rop_chain: RopChain object containing the post-pivot chain.
+            obj_size: Total size of the controlled object.
+
+        Returns:
+            dict with:
+            - 'func_ptr': gadget address (for hijacked vtable/function pointer)
+            - 'obj_layout': bytearray of the object
+            - 'chain_offset': where the ROP chain was placed
+            - 'description': human-readable layout description
+        """
+        obj = bytearray(obj_size)
+        chain_bytes = rop_chain.payload_str()
+
+        if self.is_indirect:
+            # Pointer to ROP chain goes at [src_reg + offset]
+            # Place chain data right after the pointer
+            chain_start = self.offset + 8
+            # Write a relative offset as placeholder; user adds base address at runtime
+            struct.pack_into('<Q', obj, self.offset, chain_start)
+            obj[chain_start:chain_start + len(chain_bytes)] = chain_bytes
+            return {
+                'func_ptr': self.gadget_addr,
+                'obj_layout': bytes(obj),
+                'chain_offset': chain_start,
+                'ptr_offset': self.offset,
+                'description': "Place ROP chain address at object+0x{:x}, ROP chain at object+0x{:x}".format(
+                    self.offset, chain_start),
+            }
+        else:
+            # Direct/offset: ROP chain starts at [src_reg + offset]
+            obj[self.offset:self.offset + len(chain_bytes)] = chain_bytes
+            return {
+                'func_ptr': self.gadget_addr,
+                'obj_layout': bytes(obj),
+                'chain_offset': self.offset,
+                'description': "Place ROP chain at object+0x{:x}".format(self.offset),
+            }
+
+    def __repr__(self):
+        return "PivotInfo(0x{:x}, {}, type={}, offset=0x{:x})".format(
+            self.gadget_addr, self.src_reg, self.pivot_type, self.offset)
 
 class RopChain(object):
     def __init__(self):
