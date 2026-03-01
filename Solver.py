@@ -584,14 +584,22 @@ def _build_jop_index(jop_gadgets, regs):
             val_dep = _analyze_jop_dep(gadget, reg, regs)
             if val_dep is None:
                 continue
+            # Skip identity writes (e.g. "and ah, ah" where rax_out == rax_in).
+            # These don't actually change the register and add useless chain steps.
+            if val_dep[0] == 'reg' and val_dep[1] == reg and val_dep[2] == 0:
+                continue
             by_reg[reg].append((gadget, val_dep, disp_dep))
         count += 1
+    # Sort each register's entries by instruction count (shorter = simpler = preferred)
+    for reg in by_reg:
+        by_reg[reg].sort(key=lambda x: len(x[0].insns))
     return by_reg, count
 
 
 def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                      reg_values=None, avoid_char=None,
-                     visited=None, depth=0, max_depth=3):
+                     visited=None, used_dispatch=None,
+                     depth=0, max_depth=3):
     """Recursively find a chain of JOP gadgets that sets target_reg from src_reg.
 
     Works backwards: finds a JOP gadget that writes target_reg, then recurses
@@ -601,6 +609,9 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                built by _build_jop_index.
     reg_values: dict mapping register -> offset_from_src_reg for registers
                 whose value is known. Initially {src_reg: 0}.
+    used_dispatch: dict mapping dispatch_offset -> target_addr for slots
+                already claimed by earlier steps. Prevents collisions where
+                two steps need different values at the same memory slot.
 
     Returns (steps, value_offset, is_mem) or None.
         steps: list of (gadget, dispatch_offset_from_src) from entry to last
@@ -611,6 +622,8 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
         reg_values = {src_reg: 0}
     if visited is None:
         visited = set()
+    if used_dispatch is None:
+        used_dispatch = {}
     if depth >= max_depth:
         return None
 
@@ -630,8 +643,14 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                 continue
             val_offset, val_is_mem = val_result
             disp_offset, _ = disp_result
-            if val_offset >= 0 and disp_offset >= 0:
-                return ([(gadget, disp_offset)], val_offset, val_is_mem)
+            if val_offset < 0 or disp_offset < 0:
+                continue
+            # Check dispatch collision: this step's dispatch slot
+            # will be filled later (by the caller), but check that
+            # the slot isn't already claimed for a different purpose
+            if disp_offset in used_dispatch:
+                continue  # slot already taken by another step
+            return ([(gadget, disp_offset)], val_offset, val_is_mem)
         else:
             # Recursive case: find preceding JOP(s) to satisfy deps.
             new_visited = visited | {gadget.addr}
@@ -645,7 +664,8 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                 sub_result = _find_jop_chain(
                     jop_index, src_reg, dep_reg, regs,
                     reg_values=new_reg_values, avoid_char=avoid_char,
-                    visited=new_visited, depth=depth+1, max_depth=max_depth
+                    visited=new_visited, used_dispatch=dict(used_dispatch),
+                    depth=depth+1, max_depth=max_depth
                 )
                 if sub_result is None:
                     all_ok = False
@@ -658,6 +678,9 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                 all_steps.extend(sub_steps)
                 new_reg_values[dep_reg] = dep_value_offset
                 new_visited.update(s[0].addr for s in sub_steps)
+                # Track dispatch offsets used by sub-chain steps
+                for sg, soff in sub_steps:
+                    used_dispatch[soff] = sg.addr
 
             if not all_ok:
                 continue
@@ -669,9 +692,13 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                 continue
             val_offset, val_is_mem = val_result
             disp_offset, _ = disp_result
-            if val_offset >= 0 and disp_offset >= 0:
-                all_steps.append((gadget, disp_offset))
-                return (all_steps, val_offset, val_is_mem)
+            if val_offset < 0 or disp_offset < 0:
+                continue
+            # Check dispatch collision for this step
+            if disp_offset in used_dispatch:
+                continue
+            all_steps.append((gadget, disp_offset))
+            return (all_steps, val_offset, val_is_mem)
 
     return None
 
