@@ -4,6 +4,17 @@ from triton import *
 STACK = 0x7fffff00
 MAX_FILL_STACK = 128
 
+# Base addresses for symbolized memory regions per register.
+# Each register gets a region where we place symbolic variables
+# so that memory loads like mov rdx,[rdi+8] produce symbolic results (e.g. RDI1).
+REG_MEM_BASES = {
+    'rax': 0x100000, 'rbx': 0x200000, 'rcx': 0x300000, 'rdx': 0x400000,
+    'rsi': 0x500000, 'rdi': 0x600000, 'rbp': 0x700000,
+    'r8':  0x800000, 'r9':  0x900000, 'r10': 0xa00000, 'r11': 0xb00000,
+    'r12': 0xc00000, 'r13': 0xd00000, 'r14': 0xe00000, 'r15': 0xf00000,
+}
+MAX_MEM_SLOTS = 32  # 32 slots * 8 bytes = 256 bytes per register
+
 def initialize():
     ctx = TritonContext()
     ctx.setArchitecture(ARCH.X86_64)
@@ -96,6 +107,7 @@ class Gadget(object):
         self.depends_regs = set() # registers this gadget depends on (e.g. `mov rax, rbx; ret` depends on rbx)
         self.defined_regs = dict() # registers defined to a constant (e.g. `xor rax, rax; ret`)
         self.regAst = dict()
+        self.regAst_str = dict() # string representations (survive pickle)
         self.diff_sp = 0 # stack pointer delta before ret
         self.is_analyzed = False
         self.is_asted = False
@@ -106,6 +118,7 @@ class Gadget(object):
         self.memory_write_ast = []
         self.end_type = TYPE_UNKNOWN
         self.end_ast = None
+        self.end_ast_str = None # string representation (survives pickle)
         self.end_gadget = 0 # return gadget to fix no-return gadgets
         self.end_reg_used = set() # register used in end_ast
         self.pivot = 0
@@ -175,50 +188,6 @@ class Gadget(object):
         self.analyzeGadget()
 
 
-    def _detect_indirect_pivot(self, indirect_loads, regs):
-        """Re-execute gadget with symbolized memory at indirect load sites to detect Type 3 pivots."""
-        ctx = initialize()
-        astCtxt = ctx.getAstContext()
-        for reg in regs:
-            symbolizeReg(ctx, reg)
-        ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
-        for i in range(MAX_FILL_STACK):
-            tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
-            tmpb.setAlias("STACK{}".format(i))
-
-        # Symbolize memory at the indirect load addresses
-        for idx, (concrete_addr, _, size) in enumerate(indirect_loads):
-            sym = ctx.symbolizeMemory(MemoryAccess(concrete_addr, size))
-            sym.setAlias("PIVOTMEM{}".format(idx))
-
-        # Re-execute
-        pc = 0
-        while True:
-            inst = Instruction()
-            inst.setOpcode(self.insns[pc:pc+16])
-            inst.setAddress(pc)
-            ctx.processing(inst)
-            if inst.isControlFlow():
-                break
-            pc = ctx.getConcreteRegisterValue(ctx.registers.rip)
-            if pc >= len(self.insns):
-                break
-
-        if ctx.isRegisterSymbolized(ctx.registers.rsp):
-            rsp_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
-            adjusted = ctx.simplify(astCtxt.bvsub(rsp_ast, astCtxt.bv(8, 64)), True)
-            # Find which PIVOTMEM variable appears in the rsp AST
-            childs = astCtxt.search(adjusted, AST_NODE.VARIABLE)
-            for c in childs:
-                alias = c.getSymbolicVariable().getAlias()
-                if alias.startswith("PIVOTMEM"):
-                    idx = int(alias.replace("PIVOTMEM", ""))
-                    _, lea_ast, _ = indirect_loads[idx]
-                    self.pivot_indirect = 1
-                    self.pivot_mem_ast = lea_ast
-                    self.pivot_src_reg, self.pivot_offset = _extract_reg_offset(str(lea_ast))
-                    break
-
     def analyzeGadget(self, debug=False):
         BSIZE = 8
         ctx = initialize()
@@ -227,7 +196,15 @@ class Gadget(object):
         syscalls = ["syscall"]
 
         for reg in regs:
+            # Set concrete base FIRST so memory loads from [reg+offset] hit symbolized slots
+            base = REG_MEM_BASES[reg]
+            ctx.setConcreteRegisterValue(getTritonReg(ctx, reg), base)
+            # Then symbolize — order matters, symbolize after concrete
             symbolizeReg(ctx, reg)
+            for i in range(MAX_MEM_SLOTS):
+                sym = ctx.symbolizeMemory(MemoryAccess(base + i * BSIZE, CPUSIZE.QWORD))
+                sym.setAlias("{}{}".format(reg.upper(), i))
+
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
 
         for i in range(MAX_FILL_STACK):
@@ -237,7 +214,6 @@ class Gadget(object):
         sp = STACK
         instructions = self.insns
         pc = 0
-        indirect_load_candidates = []  # (concrete_addr, lea_ast, size) for indirect pivot detection
 
         while True:
             inst = Instruction()
@@ -294,17 +270,6 @@ class Gadget(object):
 
             if not pop and inst.isMemoryRead():
                 self.is_memory_read = 1
-                # Track loads from symbolic (register-derived) addresses for indirect pivot detection
-                for load_access in inst.getLoadAccess():
-                    mem_acc = load_access[0]
-                    lea_ast = mem_acc.getLeaAst()
-                    if lea_ast is not None:
-                        childs = astCtxt.search(lea_ast, AST_NODE.VARIABLE)
-                        has_reg = any(c.getSymbolicVariable().getAlias() in regs for c in childs)
-                        if has_reg:
-                            concrete_addr = mem_acc.getAddress()
-                            if not (STACK <= concrete_addr < STACK + MAX_FILL_STACK * 8):
-                                indirect_load_candidates.append((concrete_addr, ctx.simplify(lea_ast, True), mem_acc.getSize()))
 
             if inst.isMemoryWrite() and 'mov' in inst.getDisassembly():
                 for store_access in inst.getStoreAccess():
@@ -319,12 +284,26 @@ class Gadget(object):
                 break
 
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
-            self.pivot_ast = ctx.simplify(ctx.getSymbolicRegister(ctx.registers.rsp).getAst() - 8, True)
+            rsp_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
+            self.pivot_ast = ctx.simplify(astCtxt.bvsub(rsp_ast, astCtxt.bv(8, 64)), True)
             if self.pivot_ast:
                 self.pivot = 1
-                self.pivot_src_reg, self.pivot_offset = _extract_reg_offset(str(self.pivot_ast))
-        elif indirect_load_candidates:
-            self._detect_indirect_pivot(indirect_load_candidates, regs)
+                # Check if rsp comes from a register's memory region (indirect pivot)
+                childs = astCtxt.search(self.pivot_ast, AST_NODE.VARIABLE)
+                for c in childs:
+                    alias = c.getSymbolicVariable().getAlias()
+                    for reg in regs:
+                        prefix = reg.upper()
+                        if alias.startswith(prefix) and alias[len(prefix):].isdigit():
+                            slot = int(alias[len(prefix):])
+                            self.pivot_indirect = 1
+                            self.pivot_src_reg = reg
+                            self.pivot_offset = slot * 8
+                            break
+                    if self.pivot_indirect:
+                        break
+                if not self.pivot_indirect:
+                    self.pivot_src_reg, self.pivot_offset = _extract_reg_offset(str(self.pivot_ast))
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.simplify(ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst(), True)
@@ -341,6 +320,10 @@ class Gadget(object):
         defregs = set(filter(lambda i: isinstance(self.defined_regs[i],int),
                               self.defined_regs.keys()))
         self.depends_regs = self.read_regs - defregs
+
+        # Store string representations (survive pickle, used by JOP search)
+        self.regAst_str = {r: str(v) for r, v in self.regAst.items()}
+        self.end_ast_str = str(self.end_ast) if self.end_ast else None
 
         self.diff_sp = sp - STACK
         self.is_analyzed = True
