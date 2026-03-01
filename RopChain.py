@@ -71,13 +71,18 @@ class PivotInfo(object):
                 target_addr = pivot_gadget.addr
             info.dispatch_entries.append((off, target_addr))
 
+        # Check for dispatch offset collisions: same offset but different targets
+        seen_offsets = {}
+        for off, addr in info.dispatch_entries:
+            if off in seen_offsets and seen_offsets[off] != addr:
+                return None  # same slot needs different values
+            seen_offsets[off] = addr
+
         # Check for overlaps between all dispatch slots and chain_offset
-        used_ranges = []
-        for off, _ in info.dispatch_entries:
-            used_ranges.append((off, off + 8))
-        for (s1, e1) in used_ranges:
-            for (s2, e2) in used_ranges:
-                if (s1, e1) == (s2, e2):
+        used_ranges = list(set((off, off + 8) for off, _ in info.dispatch_entries))
+        for i, (s1, e1) in enumerate(used_ranges):
+            for j, (s2, e2) in enumerate(used_ranges):
+                if i == j:
                     continue
                 if s1 < e2 and s2 < e1:
                     return None  # dispatch slots overlap
