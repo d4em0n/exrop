@@ -1,0 +1,12 @@
+{
+    "type": "reg",
+    "thunk_config": {
+        "return_thunks": [0x10000],
+    },
+    "gadgets": {
+        0x1000: 'pop rdi; jmp 0x10000',
+        0x2000: 'pop rsi; jmp 0x99999',
+        0x3000: 'pop rsi; ret',
+    },
+    "find": {"rdi": 0x41414141, "rsi": 0x42424242}
+}

@@ -1,0 +1,19 @@
+{
+    "type": "pivot_reg",
+    "thunk_config": {
+        "return_thunks": [0x10000],
+        "indirect_thunks": {0x20000: "rax"},
+    },
+    "gadgets": {
+        0x1000: 'lea rdx, [rdi+0x20]; jmp qword ptr [rdi+0x10]',
+        0x2000: 'mov rsp, rdx; jmp 0x10000',
+        0x3000: 'pop rax; jmp 0x10000',
+        0x4000: 'mov rbx, rdi; jmp 0x20000',
+    },
+    "find": "rdi",
+    "expect": {
+        "pivot_type": "jop",
+        "src_reg": "rdi",
+        "chain_offset": 0x20
+    }
+}

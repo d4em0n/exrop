@@ -287,7 +287,7 @@ class Gadget(object):
             rsp_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
             self.pivot_ast = ctx.simplify(astCtxt.bvsub(rsp_ast, astCtxt.bv(8, 64)), True)
             if self.pivot_ast:
-                self.pivot = 1
+                pivot_str = str(self.pivot_ast)
                 # Check if rsp comes from a register's memory region (indirect pivot)
                 childs = astCtxt.search(self.pivot_ast, AST_NODE.VARIABLE)
                 for c in childs:
@@ -296,14 +296,27 @@ class Gadget(object):
                         prefix = reg.upper()
                         if alias.startswith(prefix) and alias[len(prefix):].isdigit():
                             slot = int(alias[len(prefix):])
-                            self.pivot_indirect = 1
-                            self.pivot_src_reg = reg
-                            self.pivot_offset = slot * 8
+                            # Validate: AST must be exactly the variable (e.g. "RDI0"),
+                            # not a partial operation like OR/SUB/truncation around it.
+                            if pivot_str.strip() == alias:
+                                self.pivot_indirect = 1
+                                self.pivot_src_reg = reg
+                                self.pivot_offset = slot * 8
                             break
                     if self.pivot_indirect:
                         break
                 if not self.pivot_indirect:
-                    self.pivot_src_reg, self.pivot_offset = _extract_reg_offset(str(self.pivot_ast))
+                    self.pivot_src_reg, self.pivot_offset = _extract_reg_offset(pivot_str)
+                    # Reject if offset matches concrete STACK base — means
+                    # old rsp leaked into the AST (e.g. "add rsp, rdi")
+                    if self.pivot_offset == STACK:
+                        self.pivot_src_reg = None
+                        self.pivot_offset = 0
+                # Only mark as pivot if we found a valid source register
+                if self.pivot_src_reg is not None:
+                    self.pivot = 1
+                else:
+                    self.pivot_ast = None
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.simplify(ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst(), True)

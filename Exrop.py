@@ -2,16 +2,21 @@ from ChainBuilder import ChainBuilder
 from RopChain import RopChain
 from Gadget import TYPE_RETURN
 
-def parseRopGadget(filename, opt="", depth=None):
+DEFAULT_FILTER = 'pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|leave'
+KERNEL_FILTER = 'pop|xchg|add|sub|xor|or|and|mov|lea|ret|jmp|call|nop|syscall|leave'
+
+def parseRopGadget(filename, opt="", depth=None, only_filter=None):
     from subprocess import Popen, PIPE, STDOUT
     import re
 
+    if only_filter is None:
+        only_filter = DEFAULT_FILTER
     cmd = ['ROPgadget', '--binary', filename, '--multibr', '--only',
-            'pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|leave', '--dump']
+            only_filter, '--dump']
     if depth is not None:
         cmd.extend(['--depth', str(depth)])
     if opt:
-        cmd.append(opt)
+        cmd.extend(opt.split())
     process = Popen(cmd, stdout=PIPE, stderr=STDOUT)
     stdout, _ = process.communicate()
     output_lines = stdout.splitlines()
@@ -32,11 +37,27 @@ class Exrop(object):
     def __init__(self, binary):
         self.binary = binary
         self.chain_builder = ChainBuilder()
+        self.thunk_config = None
 
-    def find_gadgets(self, cache=False, add_opt="", num_process=None, depth=None):
+    def detect_kernel(self):
+        """Auto-detect kernel thunks and text range from ELF symbols."""
+        from ThunkRewriter import ThunkConfig
+        self.thunk_config = ThunkConfig.from_elf(self.binary)
+        return self.thunk_config
+
+    def find_gadgets(self, cache=False, add_opt="", num_process=None, depth=None, kernel_mode=False):
+        if kernel_mode:
+            self.detect_kernel()
+            self.thunk_config.summary()
+            if depth is None:
+                depth = 15
+
+        # Build cache filename
         if cache:
+            thunk_suffix = "_kernel" if self.thunk_config else ""
             suffix = "" if depth is None else "_d{}".format(depth)
-            fcname = "./{}{}.exrop_cache".format(self.binary.replace("/", "_"), suffix)
+            fcname = "./{}{}{}.exrop_cache".format(
+                self.binary.replace("/", "_"), thunk_suffix, suffix)
             try:
                 with open(fcname, "rb") as fc:
                     objpic = fc.read()
@@ -44,7 +65,23 @@ class Exrop(object):
                     return
             except FileNotFoundError:
                 pass
-        gadgets = parseRopGadget(self.binary, add_opt, depth=depth)
+
+        # Auto-set --range from .text section for kernel mode
+        if self.thunk_config and self.thunk_config.text_range:
+            start, end = self.thunk_config.text_range
+            range_opt = "--range 0x{:x}-0x{:x}".format(start, end)
+            add_opt = (add_opt + " " + range_opt).strip()
+
+        only_filter = KERNEL_FILTER if self.thunk_config else None
+        gadgets = parseRopGadget(self.binary, add_opt, depth=depth, only_filter=only_filter)
+
+        # Apply thunk rewriting before Triton analysis
+        if self.thunk_config:
+            from ThunkRewriter import rewrite_gadgets
+            before = len(gadgets)
+            gadgets = rewrite_gadgets(gadgets, self.thunk_config)
+            print("Thunk rewrite: {} -> {} gadgets".format(before, len(gadgets)))
+
         self.chain_builder.load_list_gadget_string(gadgets)
         self.chain_builder.analyzeAll(num_process)
         if cache:
