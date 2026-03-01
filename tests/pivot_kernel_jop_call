@@ -1,0 +1,14 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        0x4000: 'lea rdx, [rdi+0x30]; call qword ptr [rdi+0x18]',
+        0x5000: 'mov rsp, rdx; ret',
+    },
+    "find": "rdi",
+    "expect": {
+        "pivot_type": "jop",
+        "src_reg": "rdi",
+        "dispatch_offset": 0x18,
+        "chain_offset": 0x30
+    }
+}

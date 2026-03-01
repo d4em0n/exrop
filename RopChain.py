@@ -22,6 +22,12 @@ class PivotInfo(object):
         self.src_reg = src_reg
         self.offset = offset
         self.is_indirect = is_indirect
+        self.jop_gadget = None
+        self.pivot_gadget = None
+        self.dispatch_offset = None
+        self.chain_offset_computed = None
+        self.dispatch_entries = []  # list of (offset, target_addr) for multi-step JOP
+        self.jop_chain = []  # list of (gadget, dispatch_offset) for all JOP steps
 
         if is_indirect:
             self.pivot_type = 'indirect'
@@ -30,7 +36,76 @@ class PivotInfo(object):
         else:
             self.pivot_type = 'direct'
 
+    @classmethod
+    def from_jop_chain(cls, jop_steps, pivot_gadget, src_reg,
+                       chain_offset, jop_indirect=False):
+        """Create PivotInfo for a JOP->pivot chain (supports multi-step).
+
+        jop_steps: list of (gadget, dispatch_offset_from_src_reg), entry first.
+        jop_indirect: True if the pivot register gets a value LOADED from
+        memory (pointer) rather than a direct src_reg+offset expression.
+
+        Returns None if the layout is invalid (overlap or negative offsets).
+        """
+        if not jop_steps or chain_offset < 0:
+            return None
+
+        entry_gadget = jop_steps[0][0]
+        info = cls(entry_gadget, src_reg)
+        info.pivot_type = 'jop_indirect' if jop_indirect else 'jop'
+        info.jop_gadget = entry_gadget
+        info.pivot_gadget = pivot_gadget
+        info.dispatch_offset = jop_steps[0][1]  # first dispatch (backward compat)
+        info.chain_offset_computed = chain_offset
+        info.gadget_addr = entry_gadget.addr
+        info.jop_chain = list(jop_steps)
+
+        # Build dispatch_entries: each step dispatches to the next gadget
+        info.dispatch_entries = []
+        for i, (g, off) in enumerate(jop_steps):
+            if off < 0:
+                return None
+            if i + 1 < len(jop_steps):
+                target_addr = jop_steps[i + 1][0].addr
+            else:
+                target_addr = pivot_gadget.addr
+            info.dispatch_entries.append((off, target_addr))
+
+        # Check for overlaps between all dispatch slots and chain_offset
+        used_ranges = []
+        for off, _ in info.dispatch_entries:
+            used_ranges.append((off, off + 8))
+        for (s1, e1) in used_ranges:
+            for (s2, e2) in used_ranges:
+                if (s1, e1) == (s2, e2):
+                    continue
+                if s1 < e2 and s2 < e1:
+                    return None  # dispatch slots overlap
+            if not jop_indirect:
+                if s1 < chain_offset + 8 and chain_offset < e1:
+                    return None  # dispatch overlaps chain
+
+        return info
+
     def dump(self):
+        if self.pivot_type in ('jop', 'jop_indirect'):
+            n_steps = len(self.jop_chain)
+            label = "jop" if self.pivot_type == 'jop' else "jop_indirect"
+            if n_steps > 1:
+                label += " ({}-step chain)".format(n_steps)
+            else:
+                label += " (chained)" if self.pivot_type == 'jop' else " (chained, pointer)"
+            print("Pivot type: {}".format(label))
+            for i, (g, off) in enumerate(self.jop_chain):
+                print("  Step {}: 0x{:016x} # {}".format(i + 1, g.addr, g))
+            print("  Pivot:  0x{:016x} # {}".format(self.pivot_gadget.addr, self.pivot_gadget))
+            for off, addr in self.dispatch_entries:
+                print("  Dispatch: place 0x{:x} at [{}+0x{:x}]".format(addr, self.src_reg, off))
+            if self.pivot_type == 'jop_indirect':
+                print("  Place ROP chain address at [{}+0x{:x}]".format(self.src_reg, self.chain_offset_computed))
+            else:
+                print("  ROP chain starts at [{}+0x{:x}]".format(self.src_reg, self.chain_offset_computed))
+            return
         print("Pivot type: {}".format(self.pivot_type))
         print("  Gadget: 0x{:016x} # {}".format(self.gadget_addr, self.gadget))
         print("  Source register: {}".format(self.src_reg))
@@ -60,6 +135,47 @@ class PivotInfo(object):
         obj = bytearray(obj_size)
         chain_bytes = rop_chain.payload_str()
 
+        if self.pivot_type in ('jop', 'jop_indirect'):
+            # Place all dispatch entries in the object
+            for off, addr in self.dispatch_entries:
+                struct.pack_into('<Q', obj, off, addr)
+
+            if self.pivot_type == 'jop':
+                chain_start = self.chain_offset_computed
+                obj[chain_start:chain_start + len(chain_bytes)] = chain_bytes
+                desc_parts = []
+                for off, addr in self.dispatch_entries:
+                    desc_parts.append("0x{:x} at object+0x{:x}".format(addr, off))
+                return {
+                    'func_ptr': self.jop_gadget.addr,
+                    'obj_layout': bytes(obj),
+                    'chain_offset': chain_start,
+                    'dispatch_entries': list(self.dispatch_entries),
+                    'description': "JOP chain: place {}, ROP chain at object+0x{:x}".format(
+                        ", ".join(desc_parts), chain_start),
+                }
+            else:  # jop_indirect
+                ptr_offset = self.chain_offset_computed
+                # Find safe location for chain data after all used slots
+                max_used = max(off + 8 for off, _ in self.dispatch_entries)
+                chain_data_start = max(max_used, ptr_offset + 8)
+                struct.pack_into('<Q', obj, ptr_offset, chain_data_start)
+                obj[chain_data_start:chain_data_start + len(chain_bytes)] = chain_bytes
+                desc_parts = []
+                for off, addr in self.dispatch_entries:
+                    desc_parts.append("0x{:x} at object+0x{:x}".format(addr, off))
+                return {
+                    'func_ptr': self.jop_gadget.addr,
+                    'obj_layout': bytes(obj),
+                    'chain_offset': chain_data_start,
+                    'ptr_offset': ptr_offset,
+                    'dispatch_entries': list(self.dispatch_entries),
+                    'description': (
+                        "JOP indirect: place {}, "
+                        "ROP chain pointer at object+0x{:x}, chain data at object+0x{:x}"
+                    ).format(", ".join(desc_parts), ptr_offset, chain_data_start),
+                }
+
         if self.is_indirect:
             # Pointer to ROP chain goes at [src_reg + offset]
             # Place chain data right after the pointer
@@ -86,6 +202,11 @@ class PivotInfo(object):
             }
 
     def __repr__(self):
+        if self.pivot_type in ('jop', 'jop_indirect'):
+            steps_str = "->".join("0x{:x}".format(g.addr) for g, _ in self.jop_chain)
+            return "PivotInfo(jop=[{}]->pivot=0x{:x}, {}, type={}, chain=0x{:x})".format(
+                steps_str, self.pivot_gadget.addr,
+                self.src_reg, self.pivot_type, self.chain_offset_computed)
         return "PivotInfo(0x{:x}, {}, type={}, offset=0x{:x})".format(
             self.gadget_addr, self.src_reg, self.pivot_type, self.offset)
 

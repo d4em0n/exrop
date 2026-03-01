@@ -1,6 +1,7 @@
 import copy
 from triton import *
 from Gadget import *
+from Gadget import _extract_reg_offset
 from RopChain import *
 
 def _has_badchar(addr, avoid_char):
@@ -486,27 +487,287 @@ def findPivotForReg(gadgets, src_reg, avoid_char=None):
         if gadget.end_type != TYPE_RETURN:
             continue
         if gadget.pivot and getattr(gadget, 'pivot_src_reg', None) == src_reg:
-            candidates.append((gadget, getattr(gadget, 'pivot_offset', 0), False))
-        elif getattr(gadget, 'pivot_indirect', 0) and getattr(gadget, 'pivot_src_reg', None) == src_reg:
-            candidates.append((gadget, getattr(gadget, 'pivot_offset', 0), True))
+            is_indirect = bool(getattr(gadget, 'pivot_indirect', 0))
+            candidates.append((gadget, getattr(gadget, 'pivot_offset', 0), is_indirect))
     candidates.sort(key=lambda x: (x[2], abs(x[1])))
     return candidates
+
+def _parse_reg_mem_var(ast_str, regs):
+    """Parse a REG memory variable alias from an AST string.
+
+    Looks for aliases like 'RDI0', 'RSI3' etc. that indicate
+    a value was loaded from a symbolized memory region.
+
+    Returns (src_reg, slot) if found, e.g. ('rdi', 0) for 'RDI0'.
+    Returns (None, 0) if no REG memory variable is found.
+    """
+    s = ast_str.strip()
+    for reg in regs:
+        prefix = reg.upper()
+        if s.startswith(prefix) and s[len(prefix):].isdigit():
+            return reg, int(s[len(prefix):])
+    return None, 0
+
+
+def _analyze_jop_dep(gadget, reg_name, regs):
+    """Parse a gadget's AST string for a register to find its dependency.
+
+    Uses regAst_str (survives pickle) so buildAst() is not needed.
+
+    Returns ('reg', dep_reg, offset) if value = dep_reg + offset,
+            ('mem', dep_reg, slot) if value loaded from [dep_reg + slot*8],
+            or None if unparseable.
+    """
+    ast_str = gadget.regAst_str.get(reg_name)
+    if ast_str is None:
+        return None
+    reg, off = _extract_reg_offset(ast_str)
+    if reg:
+        return ('reg', reg, off)
+    mem_reg, slot = _parse_reg_mem_var(ast_str, regs)
+    if mem_reg:
+        return ('mem', mem_reg, slot)
+    return None
+
+def _analyze_jop_dispatch(gadget, regs):
+    """Parse a JOP gadget's dispatch (end_ast) dependency.
+
+    Uses end_ast_str (survives pickle) so buildAst() is not needed.
+
+    Returns ('reg', dep_reg, offset) for JMP/CALL [dep_reg+offset],
+            ('mem', dep_reg, slot) for JMP/CALL reg where reg==[dep_reg+slot*8],
+            or None if unparseable.
+    """
+    end_ast_str = gadget.end_ast_str
+    if end_ast_str is None:
+        return None
+    if gadget.end_type in (TYPE_JMP_MEM, TYPE_CALL_MEM):
+        reg, off = _extract_reg_offset(end_ast_str)
+        if reg:
+            return ('reg', reg, off)
+    elif gadget.end_type in (TYPE_JMP_REG, TYPE_CALL_REG):
+        mem_reg, slot = _parse_reg_mem_var(end_ast_str, regs)
+        if mem_reg:
+            return ('mem', mem_reg, slot)
+    return None
+
+def _resolve_offset(dep_info, reg_values):
+    """Resolve a dependency tuple to an absolute offset from src_reg.
+
+    dep_info: ('reg', dep_reg, offset) or ('mem', dep_reg, slot)
+    reg_values: dict mapping register -> offset_from_src_reg
+
+    Returns (abs_offset, is_mem) or None if dep_reg not in reg_values.
+    """
+    kind, dep_reg, val = dep_info
+    if dep_reg not in reg_values:
+        return None
+    if kind == 'reg':
+        return (reg_values[dep_reg] + val, False)
+    else:  # 'mem'
+        return (reg_values[dep_reg] + val * 8, True)
+
+def _build_jop_index(jop_gadgets, regs):
+    """Pre-analyze JOP gadgets and build lookup indices.
+
+    Returns (by_written_reg, analyzed) where:
+        by_written_reg: dict mapping reg -> list of (gadget, val_dep, disp_dep)
+        analyzed: total count of gadgets with parseable deps
+    """
+    by_reg = {r: [] for r in regs}
+    count = 0
+    for gadget in jop_gadgets:
+        disp_dep = _analyze_jop_dispatch(gadget, regs)
+        if disp_dep is None:
+            continue
+        for reg in gadget.written_regs:
+            val_dep = _analyze_jop_dep(gadget, reg, regs)
+            if val_dep is None:
+                continue
+            by_reg[reg].append((gadget, val_dep, disp_dep))
+        count += 1
+    return by_reg, count
+
+
+def _find_jop_chain(jop_index, src_reg, target_reg, regs,
+                     reg_values=None, avoid_char=None,
+                     visited=None, depth=0, max_depth=3):
+    """Recursively find a chain of JOP gadgets that sets target_reg from src_reg.
+
+    Works backwards: finds a JOP gadget that writes target_reg, then recurses
+    to satisfy that gadget's own register dependencies.
+
+    jop_index: dict mapping reg -> list of (gadget, val_dep, disp_dep),
+               built by _build_jop_index.
+    reg_values: dict mapping register -> offset_from_src_reg for registers
+                whose value is known. Initially {src_reg: 0}.
+
+    Returns (steps, value_offset, is_mem) or None.
+        steps: list of (gadget, dispatch_offset_from_src) from entry to last
+        value_offset: offset of target_reg's final value from src_reg
+        is_mem: True if target_reg is loaded from memory (pointer at that offset)
+    """
+    if reg_values is None:
+        reg_values = {src_reg: 0}
+    if visited is None:
+        visited = set()
+    if depth >= max_depth:
+        return None
+
+    for gadget, val_dep, disp_dep in jop_index.get(target_reg, []):
+        if gadget.addr in visited:
+            continue
+
+        # Collect unsatisfied register dependencies
+        all_dep_regs = {val_dep[1], disp_dep[1]}
+        unsatisfied = all_dep_regs - set(reg_values.keys())
+
+        if not unsatisfied:
+            # Base case: all deps known — compute offsets
+            val_result = _resolve_offset(val_dep, reg_values)
+            disp_result = _resolve_offset(disp_dep, reg_values)
+            if val_result is None or disp_result is None:
+                continue
+            val_offset, val_is_mem = val_result
+            disp_offset, _ = disp_result
+            if val_offset >= 0 and disp_offset >= 0:
+                return ([(gadget, disp_offset)], val_offset, val_is_mem)
+        else:
+            # Recursive case: find preceding JOP(s) to satisfy deps.
+            new_visited = visited | {gadget.addr}
+            new_reg_values = dict(reg_values)
+            all_steps = []
+            all_ok = True
+
+            for dep_reg in unsatisfied:
+                if dep_reg in new_reg_values:
+                    continue  # already resolved by a prior iteration
+                sub_result = _find_jop_chain(
+                    jop_index, src_reg, dep_reg, regs,
+                    reg_values=new_reg_values, avoid_char=avoid_char,
+                    visited=new_visited, depth=depth+1, max_depth=max_depth
+                )
+                if sub_result is None:
+                    all_ok = False
+                    break
+                sub_steps, dep_value_offset, dep_is_mem = sub_result
+                if dep_is_mem:
+                    # Can't propagate through memory loads for register substitution
+                    all_ok = False
+                    break
+                all_steps.extend(sub_steps)
+                new_reg_values[dep_reg] = dep_value_offset
+                new_visited.update(s[0].addr for s in sub_steps)
+
+            if not all_ok:
+                continue
+
+            # Compute offsets with updated reg_values
+            val_result = _resolve_offset(val_dep, new_reg_values)
+            disp_result = _resolve_offset(disp_dep, new_reg_values)
+            if val_result is None or disp_result is None:
+                continue
+            val_offset, val_is_mem = val_result
+            disp_offset, _ = disp_result
+            if val_offset >= 0 and disp_offset >= 0:
+                all_steps.append((gadget, disp_offset))
+                return (all_steps, val_offset, val_is_mem)
+
+    return None
+
+
+def findJopPivotCandidates(gadgets, src_reg, avoid_char=None):
+    """Find JOP gadget chains that can pivot rsp from src_reg.
+
+    Uses recursive search to find chains of arbitrary depth:
+    e.g., JOP1 -> JOP2 -> pivot, where JOP1 sets a register that JOP2
+    needs, and JOP2 sets the register that the pivot needs.
+
+    Returns list of (jop_steps, pivot_gadget, chain_offset, jop_indirect) tuples.
+        jop_steps: list of (gadget, dispatch_offset) from entry to last JOP
+    """
+    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp",
+            "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+
+    # Collect all ret-ending pivot gadgets (any pivot_src_reg)
+    ret_pivots = []
+    for gadget in gadgets:
+        if avoid_char and _has_badchar(gadget.addr, avoid_char):
+            continue
+        if gadget.end_type != TYPE_RETURN:
+            continue
+        if gadget.pivot and getattr(gadget, 'pivot_src_reg', None) is not None:
+            ret_pivots.append(gadget)
+
+    if not ret_pivots:
+        return []
+
+    # Collect usable JOP gadgets and build index
+    jop_gadgets = []
+    for gadget in gadgets:
+        if avoid_char and _has_badchar(gadget.addr, avoid_char):
+            continue
+        if gadget.is_memory_write:
+            continue
+        if gadget.end_type not in (TYPE_JMP_MEM, TYPE_CALL_MEM, TYPE_JMP_REG, TYPE_CALL_REG):
+            continue
+        jop_gadgets.append(gadget)
+
+    jop_index, _ = _build_jop_index(jop_gadgets, regs)
+
+    results = []
+
+    # Group pivots by target register to avoid redundant searches
+    pivots_by_reg = {}
+    for pivot_gadget in ret_pivots:
+        reg = pivot_gadget.pivot_src_reg
+        if reg not in pivots_by_reg:
+            pivots_by_reg[reg] = []
+        pivots_by_reg[reg].append(pivot_gadget)
+
+    # Search once per unique target register
+    for target_reg, pivot_list in pivots_by_reg.items():
+        chain_result = _find_jop_chain(
+            jop_index, src_reg, target_reg, regs,
+            avoid_char=avoid_char
+        )
+        if chain_result is None:
+            continue
+        steps, value_offset, is_mem = chain_result
+        for pivot_gadget in pivot_list:
+            chain_offset = value_offset + getattr(pivot_gadget, 'pivot_offset', 0)
+            if chain_offset < 0:
+                continue
+            results.append((steps, pivot_gadget, chain_offset, is_mem))
+
+    # Sort: prefer shorter chains, direct over indirect, then small offsets
+    results.sort(key=lambda x: (len(x[0]), x[3], abs(x[2])))
+    return results
 
 def solvePivotForReg(gadgets, src_reg, avoid_char=None):
     """Find kernel-style pivot gadgets that set rsp from a register.
 
     For kernel exploits where the register is already set by the caller.
-    No SMT solving needed — we just find matching pivot gadgets.
+    Finds direct ret-ending pivots first, then JOP-chained pivots.
 
     Returns a list of PivotInfo objects sorted by preference.
     """
     from RopChain import PivotInfo
 
+    # Phase 1: Direct ret-ending pivots
     candidates = findPivotForReg(gadgets, src_reg, avoid_char=avoid_char)
     results = []
     for gadget, offset, is_indirect in candidates:
         info = PivotInfo(gadget, src_reg, offset, is_indirect)
         results.append(info)
+
+    # Phase 2: JOP-chained pivots (recursive search)
+    jop_results = findJopPivotCandidates(gadgets, src_reg, avoid_char=avoid_char)
+    for jop_steps, pivot, chain_off, jop_indirect in jop_results:
+        info = PivotInfo.from_jop_chain(jop_steps, pivot, src_reg, chain_off, jop_indirect)
+        if info is not None:
+            results.append(info)
+
     return results
 
 def solvePivot(gadgets, addr_pivot, avoid_char=None):

@@ -1,0 +1,15 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        0x4000: 'lea rdx, [rdi+0x20]; jmp qword ptr [rdi+0x10]',
+        0x5000: 'mov rsp, rdx; ret',
+        0x6000: 'xchg rdi, rsp; ret',
+    },
+    "find": "rdi",
+    "expect": {
+        "pivot_type": "direct",
+        "src_reg": "rdi",
+        "offset": 0
+    },
+    "expect_count": 2
+}

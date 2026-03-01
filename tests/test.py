@@ -76,7 +76,15 @@ def test_gadget_chain(test_name):
             pivot = result[0]
             assert pivot.pivot_type == expect['pivot_type'], f"Expected type {expect['pivot_type']}, got {pivot.pivot_type}"
             assert pivot.src_reg == expect['src_reg'], f"Expected src_reg {expect['src_reg']}, got {pivot.src_reg}"
-            assert pivot.offset == expect['offset'], f"Expected offset {expect['offset']}, got {pivot.offset}"
+            if 'offset' in expect:
+                assert pivot.offset == expect['offset'], f"Expected offset {expect['offset']}, got {pivot.offset}"
+            if expect.get('pivot_type') in ('jop', 'jop_indirect'):
+                assert pivot.jop_gadget is not None, f"Expected jop_gadget for {test_name}"
+                assert pivot.pivot_gadget is not None, f"Expected pivot_gadget for {test_name}"
+                if 'dispatch_offset' in expect:
+                    assert pivot.dispatch_offset == expect['dispatch_offset'], f"Expected dispatch_offset {expect['dispatch_offset']}, got {pivot.dispatch_offset}"
+                if 'chain_offset' in expect:
+                    assert pivot.chain_offset_computed == expect['chain_offset'], f"Expected chain_offset {expect['chain_offset']}, got {pivot.chain_offset_computed}"
             pivot.dump()
         if 'expect_count' in data_test:
             assert len(result) >= data_test['expect_count'], f"Expected {data_test['expect_count']} pivots, got {len(result)}"
