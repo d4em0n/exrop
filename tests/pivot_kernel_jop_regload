@@ -1,0 +1,14 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        0x4000: 'mov rdx, qword ptr [rdi+8]; mov rax, qword ptr [rdi]; mov rdi, rdx; jmp rax',
+        0x5000: 'mov rsp, rdx; ret',
+    },
+    "find": "rdi",
+    "expect": {
+        "pivot_type": "jop_indirect",
+        "src_reg": "rdi",
+        "dispatch_offset": 0x0,
+        "chain_offset": 0x8
+    }
+}

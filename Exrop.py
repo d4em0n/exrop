@@ -2,12 +2,14 @@ from ChainBuilder import ChainBuilder
 from RopChain import RopChain
 from Gadget import TYPE_RETURN
 
-def parseRopGadget(filename, opt=""):
+def parseRopGadget(filename, opt="", depth=None):
     from subprocess import Popen, PIPE, STDOUT
     import re
 
     cmd = ['ROPgadget', '--binary', filename, '--multibr', '--only',
             'pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|leave', '--dump']
+    if depth is not None:
+        cmd.extend(['--depth', str(depth)])
     if opt:
         cmd.append(opt)
     process = Popen(cmd, stdout=PIPE, stderr=STDOUT)
@@ -31,9 +33,10 @@ class Exrop(object):
         self.binary = binary
         self.chain_builder = ChainBuilder()
 
-    def find_gadgets(self, cache=False, add_opt="", num_process=None):
+    def find_gadgets(self, cache=False, add_opt="", num_process=None, depth=None):
         if cache:
-            fcname = "./{}.exrop_cache".format(self.binary.replace("/", "_"))
+            suffix = "" if depth is None else "_d{}".format(depth)
+            fcname = "./{}{}.exrop_cache".format(self.binary.replace("/", "_"), suffix)
             try:
                 with open(fcname, "rb") as fc:
                     objpic = fc.read()
@@ -41,7 +44,7 @@ class Exrop(object):
                     return
             except FileNotFoundError:
                 pass
-        gadgets = parseRopGadget(self.binary, add_opt)
+        gadgets = parseRopGadget(self.binary, add_opt, depth=depth)
         self.chain_builder.load_list_gadget_string(gadgets)
         self.chain_builder.analyzeAll(num_process)
         if cache:
