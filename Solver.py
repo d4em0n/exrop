@@ -32,7 +32,7 @@ def findForRet(gadgets, min_diff_sp=0, not_write_regs=None, avoid_char=None):
             continue
         if isintersect(not_write_regs, gadget.written_regs):
             continue
-        if not gadget.is_memory_read and not gadget.is_memory_write and not gadget.is_syscall and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp:
+        if not gadget.is_memory_read and not gadget.is_memory_write and not gadget.is_syscall and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp and 'push' not in gadget.insstr:
             return gadget
 
 def findPivot(gadgets, not_write_regs=None, avoid_char=None):
@@ -312,9 +312,11 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
             diff = 0
             not_write = tmp_solved_regs | keep_regs
             if gadget.end_type == TYPE_JMP_REG:
-                next_gadget = findForRet(candidates[:], 0, not_write, avoid_char=avoid_char)
+                need_sp = max(0, -gadget.diff_sp)
+                next_gadget = findForRet(candidates[:], need_sp, not_write, avoid_char=avoid_char)
             elif gadget.end_type == TYPE_CALL_REG:
-                next_gadget = findForRet(candidates[:], 8, not_write, avoid_char=avoid_char)
+                need_sp = max(8, 8 - gadget.diff_sp)
+                next_gadget = findForRet(candidates[:], need_sp, not_write, avoid_char=avoid_char)
                 diff = 8
             if not next_gadget:
                 continue
