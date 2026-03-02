@@ -9,20 +9,26 @@ Features:
 - handling non-return gadgets (jmp reg, call reg)
 - set registers (`rdi=0xxxxxx, rsi=0xxxxxx`)
 - set register to register (`rdi=rax`)
-- write to mem
+- write to mem (constant and register-based addresses/values)
 - write string/bytes to mem
 - function call (`open('/etc/passwd',0)`)
 - pass register in function call (`read('rax', bss, 0x100)`)
 - avoiding badchars
 - stack pivoting (`Exrop.stack_pivot`)
+- kernel-style register pivoting with JOP chain search (`Exrop.stack_pivot_reg`)
 - syscall (`Exrop.syscall`)
+- kernel mode with automatic retpoline thunk rewriting (`kernel_mode=True`)
+- clean-only mode to filter out gadgets with dangerous side-effect memory writes
+- multiprocessing gadget analysis with progress bar
+- gadget caching (pickle) for fast re-use
 - see [examples](examples)
 
-# installation
-1. install python (3.6 is recomended and tested)
-2. install triton (https://triton.quarkslab.com/documentation/doxygen/index.html#linux_install_sec), make sure you add `-DPYTHON36=on` as cmake option
-3. install ropgadget (https://github.com/JonathanSalwan/ROPgadget)
-4. to install exrop, easily add `export PYTHONPATH=/path/to/exrop:$PYTHONPATH` in your `.bashrc` (depends on your shell)
+# Installation
+1. Install Python 3.6+
+2. Install [Triton](https://triton-library.github.io/documentation/doxygen/index.html#linux_install_sec)
+3. Install [ROPgadget](https://github.com/JonathanSalwan/ROPgadget)
+4. Optional: Install [Keystone](https://www.keystone-engine.org/) (only needed for running tests)
+5. Add exrop to your Python path: `export PYTHONPATH=/path/to/exrop:$PYTHONPATH`
 
 # demo
 ``` python
@@ -105,6 +111,36 @@ $RSP+0x0060 : 0x0000000041414141
 python3 tests.py  1,48s user 0,05s system 97% cpu 1,566 total
 
 ```
+## Kernel mode
+
+For Linux kernels with retpoline mitigations, `kernel_mode=True` automatically detects
+thunk symbols, rewrites gadgets, and restricts to the `.text` section:
+
+``` python
+from Exrop import Exrop
+
+rop = Exrop("/path/to/vmlinux")
+rop.find_gadgets(cache=True, kernel_mode=True)
+
+# Use clean_only to exclude gadgets with dangerous side-effect memory writes
+# (e.g., add byte ptr [rcx + 0x415d5be8], cl — crashes on unmapped memory)
+rop.clean_only = True
+
+# Set registers
+chain = rop.set_regs({'rdi': 0x41414141, 'rsi': 0})
+chain.dump()
+
+# Find pivot gadgets (direct, JOP-chained, indirect)
+pivots = rop.stack_pivot_reg('rdi')
+for p in pivots[:5]:
+    p.dump()
+
+# Build payload for a pivot
+payload = pivots[0].build_payload(chain)
+```
+
+## Userspace examples
+
 Another example: open-read-write gadgets!
 
 ``` python

@@ -15,27 +15,33 @@ class ChainBuilder(object):
         self.gadgets = gadgets if gadgets is not None else []
         self.regs = dict()
         self.raw_chain = None
+        self.clean_only = False
+
+    def _get_gadgets(self):
+        if self.clean_only:
+            return [g for g in self.gadgets if g.side_effect_score == 0]
+        return self.gadgets.copy()
 
     def solve_chain(self, avoid_char=None):
-        self.raw_chain = solveGadgets(self.gadgets.copy(), self.regs, avoid_char=avoid_char)
+        self.raw_chain = solveGadgets(self._get_gadgets(), self.regs, avoid_char=avoid_char)
 
     def set_regs(self, regs):
         self.regs = regs
 
     def get_syscall_addr(self, not_write_regs=None, avoid_char=None):
-        return findSyscall(self.gadgets.copy(), not_write_regs, avoid_char=avoid_char)
+        return findSyscall(self._get_gadgets(), not_write_regs, avoid_char=avoid_char)
 
     def set_writes(self, writes):
         self.writes = writes
 
     def solve_chain_write(self, avoid_char=None):
-        self.raw_chain = solveWriteGadgets(self.gadgets.copy(), self.writes, avoid_char=avoid_char)
+        self.raw_chain = solveWriteGadgets(self._get_gadgets(), self.writes, avoid_char=avoid_char)
 
     def solve_pivot(self, addr, avoid_char):
-        self.raw_chain = solvePivot(self.gadgets.copy(), addr, avoid_char)
+        self.raw_chain = solvePivot(self._get_gadgets(), addr, avoid_char)
 
     def solve_pivot_reg(self, src_reg, avoid_char=None):
-        return solvePivotForReg(self.gadgets.copy(), src_reg, avoid_char)
+        return solvePivotForReg(self._get_gadgets(), src_reg, avoid_char)
 
     def build_chain(self, next_call=None):
         if next_call:
