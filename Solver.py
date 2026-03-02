@@ -109,6 +109,11 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=None, 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(remaining, depends_regs, set(), not_write_regs)
 
+    # Sort pop candidates: prefer ret-ending, smaller diff_sp, fewer side-effect writes
+    # Gadgets with diff_sp <= 0 are pathological (more pushes than pops) and must not
+    # be preferred — their model references STACK slots beyond num_slots.
+    candidates_pop.sort(key=lambda g: (g.end_type != TYPE_RETURN, g.diff_sp if g.diff_sp > 0 else 0x7fffffffffffffff, len(g.written_regs)))
+
     # Priority: clean ret-ending exact match > pop > non-ret exact match > other defined > write
     if cand_write_first:
         candidates = candidates_write + candidates_defined2_ret + candidates_pop + candidates_defined2_other + candidates_defined + candidates_depends
@@ -187,6 +192,45 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
     if avoid_char:
         find_write_first = check_contain_avoid_char(solves.values(), avoid_char)
     candidates = findCandidatesGadgets(gadgets[:], set(solves.keys()), set(solves.items()), avoid_char=avoid_char, cand_write_first=find_write_first)
+
+    # For pure reg-to-reg solves, reorder candidates by BFS hop distance
+    # so the solver tries short transfer paths first (e.g. rdx←rax←r9)
+    # instead of exploring deep dead-end branches.
+    _reg_targets = {v for v in solves.values() if isinstance(v, str)}
+    if _reg_targets and all(isinstance(v, str) for v in solves.values()):
+        _xfer = {}
+        for g in candidates:
+            for d, s in g.defined_regs.items():
+                if isinstance(s, str):
+                    _xfer.setdefault(s, set()).add(d)
+        _reach = {}
+        for tv in _reg_targets:
+            frontier = {tv}
+            for hop in range(1, 4):
+                nxt = set()
+                for src in frontier:
+                    for dst in _xfer.get(src, ()):
+                        if dst not in _reach or hop < _reach[dst]:
+                            _reach[dst] = hop
+                            nxt.add(dst)
+                frontier = nxt
+        if _reach:
+            def _hop_key(idx_g):
+                idx, g = idx_g
+                best = 50
+                for reg, val in solves.items():
+                    if reg in g.defined_regs:
+                        inter = g.defined_regs[reg]
+                        if isinstance(inter, str):
+                            if inter in _reg_targets:
+                                best = min(best, 0)
+                            elif inter in _reach:
+                                best = min(best, _reach[inter])
+                return (best, idx)
+            indexed = list(enumerate(candidates))
+            indexed.sort(key=_hop_key)
+            candidates = [g for _, g in indexed]
+
     ctx = initialize()
     astCtxt = ctx.getAstContext()
     chains = RopChain()
@@ -361,7 +405,8 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
             dep_regs = reg_to_reg_solve - tmp_solved_regs
 
         tmp_chain = Chain()
-        tmp_chain.set_solved(gadget, tmp_solved_ordered, tmp_solved_regs, depends_regs=dep_regs)
+        if tmp_chain.set_solved(gadget, tmp_solved_ordered, tmp_solved_regs, depends_regs=dep_regs) is False:
+            continue
 
         if not chains.insert_chain(tmp_chain):
             continue
