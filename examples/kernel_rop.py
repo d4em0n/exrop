@@ -21,6 +21,7 @@ VMLINUX = sys.argv[1]
 
 e = Exrop(VMLINUX)
 e.find_gadgets(cache=True, kernel_mode=True)
+e.clean_only = True
 
 # Example: set registers for a syscall
 print("\n=== Setting registers ===")
@@ -31,10 +32,11 @@ except Exception as ex:
     print("set_regs failed: {}".format(ex))
 
 # Example: find pivot gadgets
-print("\n=== Stack pivot from rdi ===")
-try:
-    pivots = e.stack_pivot_reg('rdi')
-    for p in pivots:
-        p.dump()
-except Exception as ex:
-    print("stack_pivot_reg failed: {}".format(ex))
+for reg in ['rdi', 'rsi', 'rdx']:
+    print(f"\n=== Stack pivot from {reg} ===")
+    try:
+        pivots = e.stack_pivot_reg(reg)
+        for p in pivots:
+            p.dump()
+    except Exception as ex:
+        print("stack_pivot_reg failed: {}".format(ex))
