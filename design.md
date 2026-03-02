@@ -67,6 +67,18 @@ redirect the stack. The analysis validates the pivot AST:
 - **Indirect pivot**: AST matches exactly one REG memory variable (e.g., `mov rsp, [rdi]` → `pivot_src_reg="rdi"`, `pivot_offset=0`, `pivot_indirect=1`)
 - **Rejected**: partial operations (`or esp, [rdi]`, `sub esp, [rdi]`), 32-bit truncation (`mov esp, [rdi]`), or STACK base address leaks (`add rsp, rdi`) are not marked as pivots
 
+**Segment register filtering**: Triton does not symbolize segment registers (ES, CS,
+SS, DS, FS, GS) — they default to concrete 0. Instructions like `mov edx, es` would
+be incorrectly treated as `defined_regs["rdx"] = 0`. During analysis, if an instruction
+reads a segment register, any GP registers it writes are marked as "segment-tainted"
+and excluded from `defined_regs`.
+
+**Side-effect scoring** (`side_effect_score`): each gadget is scored for dangerous
+side-effect memory writes. Instructions that write to memory at large constant offsets
+(> 0x1000) from a register — e.g., `add byte ptr [rcx + 0x415d5be8], cl` — almost
+certainly hit unmapped memory and crash. The score is the max offset found; 0 means
+clean. Used by pivot sorting (clean gadgets first) and the `clean_only` filter.
+
 After execution, for each written register:
 
 - `regAst[reg]` stores the full symbolic AST
@@ -86,6 +98,11 @@ and ASTs are rebuilt on-demand via `buildAst()` when the solver needs them.
 (`len(g.insns)`). Shorter gadgets are simpler and tried first by all solver functions,
 producing cleaner chains (e.g., `pop rdi; ret` over `mov rdi, rax; ... ; ret`).
 
+**Clean-only filtering**: `ChainBuilder.clean_only = True` (exposed as `Exrop.clean_only`)
+filters out gadgets with `side_effect_score > 0` before passing them to any solver
+function. This removes ~7% of kernel gadgets that have dangerous side-effect memory
+writes, ensuring all gadgets in the resulting chain are safe to execute.
+
 **Multiprocessing**: `Pool.imap_unordered` parallelizes analysis across CPU cores.
 
 ## Solver Design (`Solver.py`)
@@ -97,13 +114,17 @@ Goal: given `{reg: value, ...}`, find a chain of gadgets that sets each register
 **Candidate search** (`findCandidatesGadgets`) prioritizes gadgets by type:
 
 ```
-1. candidates_defined2  -- gadget defines reg to exact (reg, value) pair needed
-2. candidates_pop       -- gadget pops the target register from stack
-3. candidates_defined   -- gadget defines the target register (but different value)
-4. candidates_write     -- gadget writes the target register (computed, not pop/define)
-5. candidates_depends   -- recursive: gadgets for dependency registers
-6. candidates_for_ret   -- small helper gadgets (diff_sp 0 or 8) for non-return fixups
+1. candidates_defined2_ret   -- exact (reg, value) match + clean ret ending
+2. candidates_pop            -- gadget pops the target register from stack
+3. candidates_defined2_other -- exact (reg, value) match but needs jmp/call fixup
+4. candidates_defined        -- gadget defines the target register (but different value)
+5. candidates_write          -- gadget writes the target register (computed, not pop/define)
+6. candidates_depends        -- recursive: gadgets for dependency registers
+7. candidates_for_ret        -- small helper gadgets (diff_sp 0 or 8) for non-return fixups
 ```
+
+The `defined2` split ensures that gadgets like `xor esi, esi; pop rbx; pop rbp; jmp rax`
+(exact match for `rsi=0` but needs jmp fixup) don't take priority over simpler `pop rsi; ret`.
 
 Gadgets with `is_memory_read`, `is_memory_write`, or unusable end types are excluded.
 The `keep_regs` set prevents gadgets that clobber protected registers.
@@ -201,7 +222,8 @@ RSP to the object so a ROP chain embedded in it executes.
 Returns a list of `PivotInfo` objects with `build_payload()` for layout generation.
 
 **Phase 1 — Direct pivots** (`findPivotForReg`): ret-ending gadgets where
-`pivot_src_reg` matches the target register. Sorted by `(is_indirect, abs(offset))`.
+`pivot_src_reg` matches the target register. Sorted by
+`(side_effect_score, is_indirect, abs(offset))` — clean gadgets first.
 
 Examples: `mov rsp, rdi; ret`, `lea rsp, [r10-8]; ret`, `xchg rsp, rax; ret`.
 
@@ -345,6 +367,7 @@ $RSP+0x0010 : 0x0000000000002000 # mov qword ptr [rdi], rcx ; ret
 | `stack_pivot(addr)` | Redirect RSP to controlled memory |
 | `stack_pivot_reg(reg)` | Find kernel-style pivots from a register (direct + JOP) |
 | `find_gadgets(kernel_mode=True)` | Auto-detect thunks, rewrite, analyze |
+| `clean_only = True` | Filter out gadgets with dangerous side-effect memory writes |
 
 Chains can be composed via `merge_ropchain()` / `+` operator for multi-stage payloads:
 ```python

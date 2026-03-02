@@ -44,6 +44,34 @@ GP_REGS = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp",
 # as defining a GP register to a known constant.
 _SEGMENT_REGS = frozenset(["es", "cs", "ss", "ds", "fs", "gs"])
 
+# Detect memory-writing instructions where the memory operand is the
+# destination (first operand):  add byte ptr [rcx + 0x415d5be8], cl
+# Excludes source-only reads:  add eax, dword ptr [rcx]
+_MEM_DEST_RE = re.compile(
+    r'(?:add|sub|or|xor|and|mov|adc|sbb|inc|dec|not|neg)\s+'
+    r'\w+\s+ptr\s+\[([^\]]+)\]')
+_CONST_OFFSET_RE = re.compile(r'[+-]\s*(?:0x)?([0-9a-fA-F]+)')
+
+def _compute_side_effect_score(insstr):
+    """Score indicating danger from side-effect memory writes.
+
+    Scans each instruction in the gadget for memory-destination operands
+    with large constant offsets (> 0x1000).  A high offset like 0x415d5be8
+    almost certainly hits unmapped memory and causes a crash.
+
+    Returns: max offset magnitude found, or 0 if clean.
+    """
+    max_offset = 0
+    for inst in insstr.split(';'):
+        m = _MEM_DEST_RE.search(inst.strip())
+        if not m:
+            continue
+        for cm in _CONST_OFFSET_RE.finditer(m.group(1)):
+            val = int(cm.group(1), 16)
+            if val > 0x1000:
+                max_offset = max(max_offset, val)
+    return max_offset
+
 def _extract_reg_offset(ast_str):
     """Extract (register_name, offset) from a simplified Triton pivot AST string.
 
@@ -133,6 +161,7 @@ class Gadget(object):
         self.pivot_src_reg = None  # source register name for pivot ('rdi', 'rsi', etc.)
         self.pivot_offset = 0     # offset from src_reg
         self.is_syscall = False
+        self.side_effect_score = 0  # max large-offset memory write (0 = clean)
 
     def __repr__(self):
         append_com = ""
@@ -358,5 +387,6 @@ class Gadget(object):
         self.end_ast_str = str(self.end_ast) if self.end_ast else None
 
         self.diff_sp = sp - STACK
+        self.side_effect_score = _compute_side_effect_score(self.insstr)
         self.is_analyzed = True
         self.is_asted = True

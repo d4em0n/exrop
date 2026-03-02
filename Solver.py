@@ -494,7 +494,7 @@ def findPivotForReg(gadgets, src_reg, avoid_char=None):
         if gadget.pivot and getattr(gadget, 'pivot_src_reg', None) == src_reg:
             is_indirect = bool(getattr(gadget, 'pivot_indirect', 0))
             candidates.append((gadget, getattr(gadget, 'pivot_offset', 0), is_indirect))
-    candidates.sort(key=lambda x: (x[2], abs(x[1])))
+    candidates.sort(key=lambda x: (x[0].side_effect_score, x[2], abs(x[1])))
     return candidates
 
 def _parse_reg_mem_var(ast_str, regs):
@@ -794,8 +794,12 @@ def findJopPivotCandidates(gadgets, src_reg, avoid_char=None):
                     continue
                 results.append((steps, pivot_gadget, chain_offset, is_mem))
 
-    # Sort: prefer shorter chains, direct over indirect, then small offsets
-    results.sort(key=lambda x: (len(x[0]), x[3], abs(x[2])))
+    # Sort: prefer clean gadgets, shorter chains, direct over indirect, small offsets
+    def _jop_score(r):
+        steps, pivot, off, is_mem = r
+        total = sum(g.side_effect_score for g, _ in steps) + pivot.side_effect_score
+        return (total, len(steps), is_mem, abs(off))
+    results.sort(key=_jop_score)
     return results
 
 def solvePivotForReg(gadgets, src_reg, avoid_char=None):

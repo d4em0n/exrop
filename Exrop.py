@@ -39,6 +39,14 @@ class Exrop(object):
         self.chain_builder = ChainBuilder()
         self.thunk_config = None
 
+    @property
+    def clean_only(self):
+        return self.chain_builder.clean_only
+
+    @clean_only.setter
+    def clean_only(self, value):
+        self.chain_builder.clean_only = value
+
     def detect_kernel(self):
         """Auto-detect kernel thunks and text range from ELF symbols."""
         from ThunkRewriter import ThunkConfig
