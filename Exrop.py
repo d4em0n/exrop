@@ -102,7 +102,7 @@ class Exrop(object):
         ropchain = self.chain_builder.build_chain()
         return ropchain
 
-    def stack_pivot_reg(self, reg_name, avoid_char=None):
+    def stack_pivot_reg(self, reg_name, avoid_char=None, used_dispatch=None):
         """Find kernel-style pivot gadgets that set rsp from a register.
 
         For kernel exploits where a hijacked function pointer is called
@@ -118,7 +118,7 @@ class Exrop(object):
             then offset, then indirect). Each contains gadget_addr, src_reg,
             offset, pivot_type, and build_payload() for layout generation.
         """
-        return self.chain_builder.solve_pivot_reg(reg_name, avoid_char)
+        return self.chain_builder.solve_pivot_reg(reg_name, avoid_char, used_dispatch=used_dispatch)
 
     def set_regs(self, regs, next_call=None, avoid_char=None):
         self.chain_builder.set_regs(regs)

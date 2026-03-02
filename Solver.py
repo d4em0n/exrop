@@ -727,7 +727,7 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
     return None
 
 
-def findJopPivotCandidates(gadgets, src_reg, avoid_char=None):
+def findJopPivotCandidates(gadgets, src_reg, avoid_char=None, used_dispatch=None):
     """Find JOP gadget chains that can pivot rsp from src_reg.
 
     Uses recursive search to find chains of arbitrary depth:
@@ -784,7 +784,8 @@ def findJopPivotCandidates(gadgets, src_reg, avoid_char=None):
         for require_direct in (True, False):
             chain_result = _find_jop_chain(
                 jop_index, src_reg, target_reg, regs,
-                avoid_char=avoid_char, require_direct=require_direct
+                avoid_char=avoid_char, used_dispatch=dict(used_dispatch) if used_dispatch else None,
+                require_direct=require_direct
             )
             if chain_result is None:
                 continue
@@ -808,11 +809,16 @@ def findJopPivotCandidates(gadgets, src_reg, avoid_char=None):
     results.sort(key=_jop_score)
     return results
 
-def solvePivotForReg(gadgets, src_reg, avoid_char=None):
+def solvePivotForReg(gadgets, src_reg, avoid_char=None, used_dispatch=None):
     """Find kernel-style pivot gadgets that set rsp from a register.
 
     For kernel exploits where the register is already set by the caller.
     Finds direct ret-ending pivots first, then JOP-chained pivots.
+
+    Args:
+        used_dispatch: dict mapping offset -> value for dispatch slots
+            already occupied (e.g. vtable entries). JOP chains will avoid
+            these offsets.
 
     Returns a list of PivotInfo objects sorted by preference.
     """
@@ -826,7 +832,7 @@ def solvePivotForReg(gadgets, src_reg, avoid_char=None):
         results.append(info)
 
     # Phase 2: JOP-chained pivots (recursive search)
-    jop_results = findJopPivotCandidates(gadgets, src_reg, avoid_char=avoid_char)
+    jop_results = findJopPivotCandidates(gadgets, src_reg, avoid_char=avoid_char, used_dispatch=used_dispatch)
     for jop_steps, pivot, chain_off, jop_indirect in jop_results:
         info = PivotInfo.from_jop_chain(jop_steps, pivot, src_reg, chain_off, jop_indirect)
         if info is not None:

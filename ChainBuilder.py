@@ -40,8 +40,8 @@ class ChainBuilder(object):
     def solve_pivot(self, addr, avoid_char):
         self.raw_chain = solvePivot(self._get_gadgets(), addr, avoid_char)
 
-    def solve_pivot_reg(self, src_reg, avoid_char=None):
-        return solvePivotForReg(self._get_gadgets(), src_reg, avoid_char)
+    def solve_pivot_reg(self, src_reg, avoid_char=None, used_dispatch=None):
+        return solvePivotForReg(self._get_gadgets(), src_reg, avoid_char, used_dispatch=used_dispatch)
 
     def build_chain(self, next_call=None):
         if next_call:
