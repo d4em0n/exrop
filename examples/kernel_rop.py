@@ -34,7 +34,7 @@ except Exception as ex:
 print("\n=== Stack pivot from rdi ===")
 try:
     pivots = e.stack_pivot_reg('rdi')
-    for p in pivots[:5]:
+    for p in pivots:
         p.dump()
 except Exception as ex:
     print("stack_pivot_reg failed: {}".format(ex))

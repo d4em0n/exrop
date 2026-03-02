@@ -89,6 +89,7 @@ class ChainBuilder(object):
                 if (i % 100 == 0 or i == total - 1):
                     self._progress(i + 1, total)
         self._clear_progress(total)
+        self.gadgets.sort(key=lambda g: len(g.insns))
 
     def save_analyzed_gadgets(self):
         saved = pickle.dumps(self.gadgets)
@@ -96,3 +97,4 @@ class ChainBuilder(object):
 
     def load_analyzed_gadgets(self, pickled_data):
         self.gadgets = pickle.loads(pickled_data)
+        self.gadgets.sort(key=lambda g: len(g.insns))
