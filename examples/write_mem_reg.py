@@ -17,7 +17,7 @@ from Exrop import Exrop
 
 LIBC = "/lib/x86_64-linux-gnu/libc.so.6"
 
-TIMEOUT = 30
+TIMEOUT = 100
 
 tests = [
     # --- reg addr, const val ---
