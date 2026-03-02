@@ -284,7 +284,8 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
                 tmp_for_refind = for_refind.copy()
                 tmp_for_refind.add((reg, val))
                 reg_refind.update(set(list(refind_dict.keys())))
-                result = solveGadgets(candidates[:], refind_dict, avoid_char, keep_regs=keep_regs, for_refind=tmp_for_refind, rec_limit=rec_limit+1)
+                refind_keep = keep_regs | {val} if isinstance(val, str) else keep_regs
+                result = solveGadgets(candidates[:], refind_dict, avoid_char, keep_regs=refind_keep, for_refind=tmp_for_refind, rec_limit=rec_limit+1)
 
             if result:
                 if isinstance(val, str):
