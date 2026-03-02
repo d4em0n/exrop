@@ -369,7 +369,8 @@ class Chain(object):
         self.depends_regs.update(depends_regs)
         self.gadget = gadget
         depends_chain_values = []
-        chain_values = [ChainItem(0)]*(gadget.diff_sp//8 + 1)
+        num_slots = max(gadget.diff_sp // 8 + 1, 1)
+        chain_values = [ChainItem(0)] * num_slots
         chain_values[0] = ChainItem(gadget.addr, 0, str(gadget), CHAINITEM_TYPE_ADDR)
         for chain_item in values:
             if isinstance(chain_item, RopChain):
