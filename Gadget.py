@@ -39,6 +39,11 @@ TYPE_UNKNOWN = 5
 GP_REGS = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp",
            "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
 
+# Segment registers — not symbolized by Triton, so their concrete values
+# (default 0) are unreliable.  Gadgets reading these should not be treated
+# as defining a GP register to a known constant.
+_SEGMENT_REGS = frozenset(["es", "cs", "ss", "ds", "fs", "gs"])
+
 def _extract_reg_offset(ast_str):
     """Extract (register_name, offset) from a simplified Triton pivot AST string.
 
@@ -214,6 +219,7 @@ class Gadget(object):
         sp = STACK
         instructions = self.insns
         pc = 0
+        _seg_tainted = set()  # GP regs tainted by segment register reads
 
         while True:
             inst = Instruction()
@@ -234,11 +240,20 @@ class Gadget(object):
                         pop = True
                         self.popped_regs.add(regname)
 
+            has_seg_read = False
             for r in red:
-                regname = regx86_64(r[0].getName())
+                rname = r[0].getName()
+                regname = regx86_64(rname)
                 if regname:
                     tmp_red.add(regname)
                     self.read_regs.add(regname)
+                elif rname in _SEGMENT_REGS:
+                    has_seg_read = True
+            if has_seg_read:
+                for wrt in written:
+                    gp = regx86_64(wrt[0].getName())
+                    if gp:
+                        _seg_tainted.add(gp)
 
             if inst.isControlFlow(): # check if end of gadget
                 type_end = 0
@@ -320,6 +335,10 @@ class Gadget(object):
 
         for reg in self.written_regs:
             self.regAst[reg] = ctx.simplify(ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst(), True)
+            # Skip registers tainted by segment register reads — their
+            # concrete value (Triton default 0) is not reliable.
+            if reg in _seg_tainted:
+                continue
             simplified = str(self.regAst[reg])
             if simplified in regs:
                 self.defined_regs[reg] = simplified

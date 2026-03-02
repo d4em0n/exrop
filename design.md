@@ -52,7 +52,20 @@ At the control flow terminator (ret/jmp/call):
 | `TYPE_RETURN` | RSP increased by 8 (normal ret) | Clean gadget ending |
 | `TYPE_JMP_REG` | RSP unchanged, jumps via register | Needs a helper ret gadget |
 | `TYPE_CALL_REG` | RSP decreased by 8, calls register | Needs a helper ret gadget (diff_sp += 8) |
-| `TYPE_JMP_MEM` / `TYPE_CALL_MEM` | Indirect via memory | Rejected by solver |
+| `TYPE_JMP_MEM` / `TYPE_CALL_MEM` | Indirect via memory | Used by JOP pivot search |
+
+**Per-register memory symbolization**: each GP register gets a memory region
+(`REG_MEM_BASES`) with 32 symbolic slots (e.g., `RDI0`, `RDI1`, ...). The register's
+concrete value is set to the region's base before symbolization, so loads like
+`mov rdx, [rdi+8]` hit symbolized memory and produce trackable symbolic results.
+This enables JOP dispatch analysis and indirect pivot detection.
+
+**Stack pivot detection**: if RSP is symbolized after execution, the gadget can
+redirect the stack. The analysis validates the pivot AST:
+
+- **Direct pivot**: AST is a simple register expression (e.g., `mov rsp, rdi` → `pivot_src_reg="rdi"`, `pivot_offset=0`), or register+offset (`lea rsp, [r10-8]` → `pivot_src_reg="r10"`, `pivot_offset=-8`)
+- **Indirect pivot**: AST matches exactly one REG memory variable (e.g., `mov rsp, [rdi]` → `pivot_src_reg="rdi"`, `pivot_offset=0`, `pivot_indirect=1`)
+- **Rejected**: partial operations (`or esp, [rdi]`, `sub esp, [rdi]`), 32-bit truncation (`mov esp, [rdi]`), or STACK base address leaks (`add rsp, rdi`) are not marked as pivots
 
 After execution, for each written register:
 
@@ -60,14 +73,20 @@ After execution, for each written register:
 - `defined_regs[reg]` stores the simplified value if it's a constant (`xor rax,rax` -> `0`)
   or a direct register copy (`mov rax,rbx` -> `"rbx"`)
 - `depends_regs` = read registers minus constant-defined registers
+- `regAst_str[reg]` / `end_ast_str` store string representations that survive pickle
+  (used by JOP search to avoid expensive `buildAst()` on all candidates)
 
-### 3. Caching (`ChainBuilder.save_analyzed_gadgets`)
+### 3. Caching and Sorting (`ChainBuilder`)
 
-Analyzed gadgets are serialized with pickle. AST nodes (Triton `AstNode` objects) cannot
+**Caching**: analyzed gadgets are serialized with pickle. AST nodes (Triton `AstNode` objects) cannot
 be pickled, so `__getstate__` strips them. On cache load, gadgets have `is_asted=False`
 and ASTs are rebuilt on-demand via `buildAst()` when the solver needs them.
 
-Multiprocessing (`Pool.imap_unordered`) parallelizes analysis across CPU cores.
+**Sorting**: after analysis or cache load, gadgets are sorted by opcode length
+(`len(g.insns)`). Shorter gadgets are simpler and tried first by all solver functions,
+producing cleaner chains (e.g., `pop rdi; ret` over `mov rdi, rax; ... ; ret`).
+
+**Multiprocessing**: `Pool.imap_unordered` parallelizes analysis across CPU cores.
 
 ## Solver Design (`Solver.py`)
 
@@ -165,10 +184,109 @@ instructions. The Triton AST captures this: `memory_write_ast[0]` reflects the
 register values at the time of the store, not after. Only gadgets ending with `ret`
 are used (non-return write gadgets are filtered out).
 
-### Stack Pivot Solving (`solvePivot`)
+### Stack Pivot Solving
 
-Finds gadgets that modify RSP to a controlled value (e.g., `xchg rsp, rax`).
-The `pivot_ast` captures the symbolic expression for the new RSP value.
+#### Absolute Pivot (`solvePivot`)
+
+Finds gadgets that set RSP to a specific address (e.g., `xchg rsp, rax; ret` where
+rax is solved to the target address). Used for userspace exploits where the pivot
+target is a known writable address.
+
+#### Register-Based Pivot (`solvePivotForReg`)
+
+For kernel exploits where a hijacked function pointer is called with a register
+(typically `rdi`) pointing to a controlled object. Finds pivot gadgets that redirect
+RSP to the object so a ROP chain embedded in it executes.
+
+Returns a list of `PivotInfo` objects with `build_payload()` for layout generation.
+
+**Phase 1 — Direct pivots** (`findPivotForReg`): ret-ending gadgets where
+`pivot_src_reg` matches the target register. Sorted by `(is_indirect, abs(offset))`.
+
+Examples: `mov rsp, rdi; ret`, `lea rsp, [r10-8]; ret`, `xchg rsp, rax; ret`.
+
+**Phase 2 — JOP-chained pivots** (`findJopPivotCandidates`): when no direct pivot
+exists for the target register (common in kernels — typically only `rax`, `rbp`,
+`r10`, `r13` have direct pivots), the solver searches for JOP gadget chains that
+bridge the gap.
+
+Example chain for `rdi` pivot (no direct `mov rsp, rdi` exists):
+```
+Step 1: mov rax, [rdi+0x18]; jmp rax    — loads pivot addr from controlled object
+Pivot:  xchg rsp, rax; ret              — redirects RSP
+Layout: place xchg_addr at [rdi+0x18], ROP chain follows
+```
+
+**JOP index** (`_build_jop_index`): pre-analyzes all JOP gadgets (those ending with
+`jmp reg`, `jmp [reg+off]`, `call reg`, `call [reg+off]`) using string representations
+(`regAst_str`, `end_ast_str`) — no `buildAst()` needed. Builds a lookup table grouped
+by written register for O(1) access.
+
+Quality filters:
+- Identity writes filtered (e.g., `and ah, ah` where `rax_out == rax_in`)
+- Entries sorted by opcode length (shorter gadgets tried first)
+
+**Recursive search** (`_find_jop_chain`): works backwards from the pivot's required
+register, finding JOP gadgets to satisfy dependencies. Tracks `used_dispatch` offsets
+to prevent collisions where two steps need different values at the same memory slot.
+Max depth of 3 (configurable).
+
+**Dispatch collision detection** (`RopChain.from_jop_chain`): validates that all
+dispatch entries in a chain use unique offsets. Checks for memory region overlaps
+between dispatch entries and the ROP chain payload.
+
+## Kernel Support (`ThunkRewriter.py`)
+
+Linux kernels with retpoline mitigations replace control flow instructions:
+- `ret` → `jmp __x86_return_thunk` (semantically = ret)
+- `jmp reg` → `jmp __x86_indirect_thunk_<reg>` (semantically = jmp reg)
+- `call reg` → `call __x86_indirect_thunk_<reg>` (semantically = call reg)
+
+ROPgadget extracts ~1.3M gadgets from a typical vmlinux, but Triton can't analyze
+thunk-ending gadgets because the `jmp` goes to an address outside the gadget's opcode
+buffer → `TYPE_UNKNOWN` → discarded.
+
+### Thunk Detection (`ThunkConfig.from_elf`)
+
+Auto-detects thunks from ELF `.symtab` symbols:
+- `__x86_return_thunk` → return thunk addresses
+- `__x86_indirect_thunk_<reg>` → indirect thunk addresses mapped to register names
+- `.text` section bounds for `--range` filtering
+
+### Gadget Rewriting (`rewrite_gadgets`)
+
+Pre-processes gadgets before Triton analysis:
+
+| Gadget ending | Action |
+|---|---|
+| `jmp __x86_return_thunk` | Rewrite to `ret` (0xc3 + NOP padding) |
+| `jmp __x86_indirect_thunk_<reg>` | Rewrite to `jmp reg` opcode + NOP padding |
+| `call __x86_indirect_thunk_<reg>` | Rewrite to `call reg` opcode + NOP padding |
+| `call __x86_return_thunk` | Filter out (push+ret = nop, useless) |
+| `jmp/call` to unknown address | Filter out (internal branch, not a gadget) |
+| `ret N` (return with stack adjust) | Filter out (complicates chain layout) |
+| `jmp [rip + N]` | Filter out (PC-relative indirect, not controllable) |
+
+Opcode replacement handles 5-byte near jmp/call (`0xe9`/`0xe8`) and 2-byte short
+jmp (`0xeb`), padding with NOPs to maintain gadget length.
+
+Typical impact: ~1.3M raw gadgets → ~117k usable gadgets.
+
+### Usage
+
+```python
+e = Exrop("vmlinux")
+e.find_gadgets(cache=True, kernel_mode=True)  # auto-detect + rewrite + analyze
+chain = e.set_regs({'rdi': 0x41414141})
+pivots = e.stack_pivot_reg('rdi')
+```
+
+`kernel_mode=True` automatically:
+- Detects thunks from ELF symbols
+- Sets `--range` to `.text` section
+- Uses expanded instruction filter (`or|and|lea|nop` added)
+- Sets depth=15 (default for kernel gadget complexity)
+- Applies thunk rewriting before Triton analysis
 
 ## Chain Assembly (`RopChain`)
 
@@ -225,6 +343,8 @@ $RSP+0x0010 : 0x0000000000002000 # mov qword ptr [rdi], rcx ; ret
 | `func_call(addr, args)` | Set up sysv calling convention + call target |
 | `syscall(num, args)` | Set up syscall registers + find syscall gadget |
 | `stack_pivot(addr)` | Redirect RSP to controlled memory |
+| `stack_pivot_reg(reg)` | Find kernel-style pivots from a register (direct + JOP) |
+| `find_gadgets(kernel_mode=True)` | Auto-detect thunks, rewrite, analyze |
 
 Chains can be composed via `merge_ropchain()` / `+` operator for multi-stage payloads:
 ```python
@@ -238,10 +358,11 @@ chain += e.func_call(write_addr, [1, buf_addr, 0x100])
 | File | Role |
 |---|---|
 | `Exrop.py` | User-facing API, ROPgadget integration |
-| `ChainBuilder.py` | Gadget management, multiprocessing, pickle cache |
+| `ChainBuilder.py` | Gadget management, multiprocessing, pickle cache, sorting |
 | `Gadget.py` | Per-gadget symbolic execution with Triton |
-| `Solver.py` | Constraint solving: registers, memory writes, pivots |
-| `RopChain.py` | Chain data structures, ordering, serialization |
+| `Solver.py` | Constraint solving: registers, memory writes, pivots, JOP chains |
+| `RopChain.py` | Chain data structures, ordering, serialization, PivotInfo |
+| `ThunkRewriter.py` | Kernel thunk detection and gadget rewriting |
 | `tests/test.py` | Pytest harness, auto-discovers test data files |
 | `tests/*` | Test data files (gadget dicts with expected solve type) |
 | `examples/` | Usage examples on real binaries |
