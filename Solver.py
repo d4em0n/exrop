@@ -199,8 +199,6 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
         tmp_solved_ordered = []
         tmp_solved_regs = set()
         tmp_solved_ordered2 = []
-        if not gadget.is_asted:
-            gadget.buildAst()
         reg_to_reg_solve = set()
 
         if isintersect(keep_regs, gadget.written_regs):
@@ -210,7 +208,6 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
             if reg not in gadget.written_regs or reg in gadget.end_reg_used:
                 continue
 
-            regAst = gadget.regAst[reg]
             if reg in gadget.defined_regs and gadget.defined_regs[reg] == val:
                 tmp_solved_regs.add(reg)
                 tmp_solved_ordered.append([])
@@ -226,6 +223,10 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
                 else:
                     continue
             else:
+                # SMT solving requires AST — rebuild if needed (lazy)
+                if not gadget.is_asted:
+                    gadget.buildAst()
+                regAst = gadget.regAst[reg]
                 if avoid_char:
                     if reg in gadget.defined_regs and isinstance(gadget.defined_regs[reg], int):
                         continue
@@ -303,6 +304,8 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
             continue
 
         if gadget.end_type != TYPE_RETURN:
+            if not gadget.is_asted:
+                gadget.buildAst()
             if isintersect(set(list(solves.keys())), gadget.end_reg_used) or not gadget.end_ast:
                 continue
             next_gadget = None
