@@ -269,16 +269,18 @@ class Gadget(object):
                         pop = True
                         self.popped_regs.add(regname)
 
-            has_seg_read = False
+            has_tainted_read = False
             for r in red:
                 rname = r[0].getName()
                 regname = regx86_64(rname)
                 if regname:
                     tmp_red.add(regname)
                     self.read_regs.add(regname)
+                    if regname in _seg_tainted:
+                        has_tainted_read = True
                 elif rname in _SEGMENT_REGS:
-                    has_seg_read = True
-            if has_seg_read:
+                    has_tainted_read = True
+            if has_tainted_read:
                 for wrt in written:
                     gp = regx86_64(wrt[0].getName())
                     if gp:
