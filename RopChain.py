@@ -379,6 +379,8 @@ class Chain(object):
                 depends_chain_values += chain_item.get_chains()
                 continue
             if chain_item:
+                if chain_item.idx_chain >= num_slots:
+                    return False
                 chain_values[chain_item.idx_chain] = chain_item
 
         self.chain_values += depends_chain_values + chain_values

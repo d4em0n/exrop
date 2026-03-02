@@ -72,6 +72,77 @@ def _compute_side_effect_score(insstr):
                 max_offset = max(max_offset, val)
     return max_offset
 
+# Precompiled mapping: every x86-64 register variant -> 64-bit base name.
+# Used by _extract_used_regs to quickly identify which GP registers a gadget
+# references, enabling lazy symbolization.
+_REG_VARIANT_MAP = {}
+_REG_VARIANTS = {
+    'rax': ['al', 'ah', 'ax', 'eax', 'rax'],
+    'rbx': ['bl', 'bh', 'bx', 'ebx', 'rbx'],
+    'rcx': ['cl', 'ch', 'cx', 'ecx', 'rcx'],
+    'rdx': ['dl', 'dh', 'dx', 'edx', 'rdx'],
+    'rdi': ['dil', 'di', 'edi', 'rdi'],
+    'rsi': ['sil', 'si', 'esi', 'rsi'],
+    'rbp': ['bp', 'ebp', 'rbp'],
+    'r8':  ['r8b', 'r8w', 'r8d', 'r8'],
+    'r9':  ['r9b', 'r9w', 'r9d', 'r9'],
+    'r10': ['r10b', 'r10w', 'r10d', 'r10'],
+    'r11': ['r11b', 'r11w', 'r11d', 'r11'],
+    'r12': ['r12b', 'r12w', 'r12d', 'r12'],
+    'r13': ['r13b', 'r13w', 'r13d', 'r13'],
+    'r14': ['r14b', 'r14w', 'r14d', 'r14'],
+    'r15': ['r15b', 'r15w', 'r15d', 'r15'],
+}
+for _base, _variants in _REG_VARIANTS.items():
+    for _v in _variants:
+        _REG_VARIANT_MAP[_v] = _base
+
+# Match register-like tokens: word boundaries around register names.
+# Sorted longest-first so r10 matches before r1.
+_REG_TOKEN_RE = re.compile(
+    r'\b(' + '|'.join(sorted(_REG_VARIANT_MAP.keys(), key=len, reverse=True)) + r')\b'
+)
+
+# Instructions with implicit GP register usage not visible in disassembly text.
+_IMPLICIT_REGS = {
+    'leave': {'rbp'},
+    'mul': {'rax', 'rdx'}, 'imul': {'rax', 'rdx'},
+    'div': {'rax', 'rdx'}, 'idiv': {'rax', 'rdx'},
+    'cdq': {'rax', 'rdx'}, 'cqo': {'rax', 'rdx'},
+    'cwd': {'rax', 'rdx'}, 'cbw': {'rax'},
+    'cwde': {'rax'}, 'cdqe': {'rax'},
+    'stosb': {'rax', 'rdi'}, 'stosw': {'rax', 'rdi'},
+    'stosd': {'rax', 'rdi'}, 'stosq': {'rax', 'rdi'},
+    'lodsb': {'rax', 'rsi'}, 'lodsw': {'rax', 'rsi'},
+    'lodsd': {'rax', 'rsi'}, 'lodsq': {'rax', 'rsi'},
+    'movsb': {'rsi', 'rdi'}, 'movsw': {'rsi', 'rdi'},
+    'movsd': {'rsi', 'rdi'}, 'movsq': {'rsi', 'rdi'},
+    'scasb': {'rax', 'rdi'}, 'scasw': {'rax', 'rdi'},
+    'scasd': {'rax', 'rdi'}, 'scasq': {'rax', 'rdi'},
+    'cmpsb': {'rsi', 'rdi'}, 'cmpsw': {'rsi', 'rdi'},
+    'cmpsd': {'rsi', 'rdi'}, 'cmpsq': {'rsi', 'rdi'},
+    'xlatb': {'rax', 'rbx'},
+    'cpuid': {'rax', 'rbx', 'rcx', 'rdx'},
+    'syscall': {'rax', 'rdi', 'rsi', 'rdx', 'r10', 'r8', 'r9'},
+}
+
+def _extract_used_regs(insstr):
+    """Extract the set of 64-bit GP register base names referenced in an instruction string."""
+    result = {_REG_VARIANT_MAP[m] for m in _REG_TOKEN_RE.findall(insstr)}
+    for inst in insstr.split(';'):
+        parts = inst.strip().split()
+        if not parts:
+            continue
+        mnemonic = parts[0]
+        if mnemonic in ('rep', 'repe', 'repz', 'repne', 'repnz'):
+            result.add('rcx')
+            if len(parts) > 1:
+                mnemonic = parts[1]
+        implicit = _IMPLICIT_REGS.get(mnemonic)
+        if implicit:
+            result.update(implicit)
+    return result
+
 def _extract_reg_offset(ast_str):
     """Extract (register_name, offset) from a simplified Triton pivot AST string.
 
@@ -229,19 +300,21 @@ class Gadget(object):
         regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rbp", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
         syscalls = ["syscall"]
 
+        used_regs = _extract_used_regs(self.insstr)
         for reg in regs:
-            # Set concrete base FIRST so memory loads from [reg+offset] hit symbolized slots
             base = REG_MEM_BASES[reg]
             ctx.setConcreteRegisterValue(getTritonReg(ctx, reg), base)
-            # Then symbolize — order matters, symbolize after concrete
-            symbolizeReg(ctx, reg)
-            for i in range(MAX_MEM_SLOTS):
-                sym = ctx.symbolizeMemory(MemoryAccess(base + i * BSIZE, CPUSIZE.QWORD))
-                sym.setAlias("{}{}".format(reg.upper(), i))
+            if reg in used_regs:
+                symbolizeReg(ctx, reg)
+                for i in range(MAX_MEM_SLOTS):
+                    sym = ctx.symbolizeMemory(MemoryAccess(base + i * BSIZE, CPUSIZE.QWORD))
+                    sym.setAlias("{}{}".format(reg.upper(), i))
 
         ctx.setConcreteRegisterValue(ctx.registers.rsp, STACK)
 
-        for i in range(MAX_FILL_STACK):
+        n_insns = self.insstr.count(';') + 1
+        stack_slots = min(MAX_FILL_STACK, max(16, n_insns * 3))
+        for i in range(stack_slots):
             tmpb = ctx.symbolizeMemory(MemoryAccess(STACK+(i*8), CPUSIZE.QWORD))
             tmpb.setAlias("STACK{}".format(i))
 
