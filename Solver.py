@@ -69,7 +69,8 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=None, 
     candidates_pop = []
     candidates_write = []
     candidates_defined = []
-    candidates_defined2 = []
+    candidates_defined2_ret = []   # exact match + clean ret ending
+    candidates_defined2_other = [] # exact match but needs jmp/call fixup
     candidates_for_ret = []
     depends_regs = set()
     remaining = []
@@ -87,7 +88,10 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=None, 
         # Categorize by how the gadget writes target registers
         if isintersect(regs_write, set(gadget.defined_regs.keys())):
             if regs_items and isintersect(regs_items, set(gadget.defined_regs.items())):
-                candidates_defined2.append(gadget)
+                if gadget.end_type == TYPE_RETURN:
+                    candidates_defined2_ret.append(gadget)
+                else:
+                    candidates_defined2_other.append(gadget)
             else:
                 candidates_defined.append(gadget)
             depends_regs.update(gadget.depends_regs)
@@ -105,10 +109,11 @@ def findCandidatesGadgets(gadgets, regs_write, regs_items, not_write_regs=None, 
     if depends_regs:
         candidates_depends = findCandidatesGadgets(remaining, depends_regs, set(), not_write_regs)
 
+    # Priority: clean ret-ending exact match > pop > non-ret exact match > other defined > write
     if cand_write_first:
-        candidates = candidates_write + candidates_defined2 + candidates_pop + candidates_defined + candidates_depends
+        candidates = candidates_write + candidates_defined2_ret + candidates_pop + candidates_defined2_other + candidates_defined + candidates_depends
     else:
-        candidates = candidates_defined2 + candidates_pop + candidates_defined + candidates_write + candidates_depends
+        candidates = candidates_defined2_ret + candidates_pop + candidates_defined2_other + candidates_defined + candidates_write + candidates_depends
 
     # Add small ret/nop gadgets as helpers for non-return fixups
     for gadget in remaining:
@@ -590,16 +595,16 @@ def _build_jop_index(jop_gadgets, regs):
                 continue
             by_reg[reg].append((gadget, val_dep, disp_dep))
         count += 1
-    # Sort each register's entries by instruction count (shorter = simpler = preferred)
+    # Sort: prefer fewer unique dep registers (simpler chains), then by opcode length
     for reg in by_reg:
-        by_reg[reg].sort(key=lambda x: len(x[0].insns))
+        by_reg[reg].sort(key=lambda x: (len({x[1][1], x[2][1]}), len(x[0].insns)))
     return by_reg, count
 
 
 def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                      reg_values=None, avoid_char=None,
                      visited=None, used_dispatch=None,
-                     depth=0, max_depth=3):
+                     depth=0, max_depth=3, require_direct=False):
     """Recursively find a chain of JOP gadgets that sets target_reg from src_reg.
 
     Works backwards: finds a JOP gadget that writes target_reg, then recurses
@@ -612,6 +617,8 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
     used_dispatch: dict mapping dispatch_offset -> target_addr for slots
                 already claimed by earlier steps. Prevents collisions where
                 two steps need different values at the same memory slot.
+    require_direct: if True, only accept chains where the final target_reg
+                value is a direct offset (is_mem=False), not a memory load.
 
     Returns (steps, value_offset, is_mem) or None.
         steps: list of (gadget, dispatch_offset_from_src) from entry to last
@@ -645,6 +652,8 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
             disp_offset, _ = disp_result
             if val_offset < 0 or disp_offset < 0:
                 continue
+            if require_direct and val_is_mem:
+                continue  # caller wants direct offset, not memory load
             # Check dispatch collision: this step's dispatch slot
             # will be filled later (by the caller), but check that
             # the slot isn't already claimed for a different purpose
@@ -655,6 +664,7 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
             # Recursive case: find preceding JOP(s) to satisfy deps.
             new_visited = visited | {gadget.addr}
             new_reg_values = dict(reg_values)
+            new_used_dispatch = dict(used_dispatch)
             all_steps = []
             all_ok = True
 
@@ -664,7 +674,7 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                 sub_result = _find_jop_chain(
                     jop_index, src_reg, dep_reg, regs,
                     reg_values=new_reg_values, avoid_char=avoid_char,
-                    visited=new_visited, used_dispatch=dict(used_dispatch),
+                    visited=new_visited, used_dispatch=dict(new_used_dispatch),
                     depth=depth+1, max_depth=max_depth
                 )
                 if sub_result is None:
@@ -678,9 +688,15 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
                 all_steps.extend(sub_steps)
                 new_reg_values[dep_reg] = dep_value_offset
                 new_visited.update(s[0].addr for s in sub_steps)
-                # Track dispatch offsets used by sub-chain steps
+                # Track dispatch offsets and register clobbers from sub-chain
                 for sg, soff in sub_steps:
-                    used_dispatch[soff] = sg.addr
+                    new_used_dispatch[soff] = sg.addr
+                    # Invalidate registers clobbered by this gadget.
+                    # The target dep_reg was just set; other written_regs
+                    # are side effects (e.g. pop rbx) that destroy prior values.
+                    for clobbered in sg.written_regs:
+                        if clobbered != dep_reg and clobbered in new_reg_values:
+                            del new_reg_values[clobbered]
 
             if not all_ok:
                 continue
@@ -694,8 +710,10 @@ def _find_jop_chain(jop_index, src_reg, target_reg, regs,
             disp_offset, _ = disp_result
             if val_offset < 0 or disp_offset < 0:
                 continue
+            if require_direct and val_is_mem:
+                continue
             # Check dispatch collision for this step
-            if disp_offset in used_dispatch:
+            if disp_offset in new_used_dispatch:
                 continue
             all_steps.append((gadget, disp_offset))
             return (all_steps, val_offset, val_is_mem)
@@ -752,20 +770,29 @@ def findJopPivotCandidates(gadgets, src_reg, avoid_char=None):
             pivots_by_reg[reg] = []
         pivots_by_reg[reg].append(pivot_gadget)
 
-    # Search once per unique target register
+    # Search per unique target register: try direct (non-indirect) first, then any.
+    # This ensures both jop (inline chain) and jop_indirect (pointer) results
+    # are returned when available.
     for target_reg, pivot_list in pivots_by_reg.items():
-        chain_result = _find_jop_chain(
-            jop_index, src_reg, target_reg, regs,
-            avoid_char=avoid_char
-        )
-        if chain_result is None:
-            continue
-        steps, value_offset, is_mem = chain_result
-        for pivot_gadget in pivot_list:
-            chain_offset = value_offset + getattr(pivot_gadget, 'pivot_offset', 0)
-            if chain_offset < 0:
+        seen_steps = set()  # deduplicate by entry gadget address
+        for require_direct in (True, False):
+            chain_result = _find_jop_chain(
+                jop_index, src_reg, target_reg, regs,
+                avoid_char=avoid_char, require_direct=require_direct
+            )
+            if chain_result is None:
                 continue
-            results.append((steps, pivot_gadget, chain_offset, is_mem))
+            steps, value_offset, is_mem = chain_result
+            # Deduplicate: skip if same entry gadget already found
+            entry_key = tuple(g.addr for g, _ in steps)
+            if entry_key in seen_steps:
+                continue
+            seen_steps.add(entry_key)
+            for pivot_gadget in pivot_list:
+                chain_offset = value_offset + getattr(pivot_gadget, 'pivot_offset', 0)
+                if chain_offset < 0:
+                    continue
+                results.append((steps, pivot_gadget, chain_offset, is_mem))
 
     # Sort: prefer shorter chains, direct over indirect, then small offsets
     results.sort(key=lambda x: (len(x[0]), x[3], abs(x[2])))
