@@ -1,0 +1,17 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        0x4000: 'ret',
+        0x4001: 'pop rbx; ret',
+        0x4002: 'pop rax; pop rbx; ret',
+        0x4003: 'mov rcx, rdx; pop rbx; ret',
+        0x4004: 'xor rax, rax; pop rbx; ret',
+        0x4010: 'push rdi; pop rsp; pop rbx; ret',
+    },
+    "find": "rdi",
+    "expect": {
+        "pivot_type": "offset",
+        "src_reg": "rdi",
+        "offset": 0x8
+    }
+}

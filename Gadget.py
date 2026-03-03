@@ -39,6 +39,29 @@ TYPE_UNKNOWN = 5
 GP_REGS = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp",
            "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
 
+# Suffix dict for early-exit composition (set by ChainBuilder before Pool fork)
+_suffix_dict = None
+
+# Precompiled regex for _substitute_ast_str — single-pass handles both
+# STACK aliases and register names simultaneously (avoids double-substitution).
+_STACK_ALIAS_RE = re.compile(r'STACK(\d+)')
+_COMPOSE_SUB_RE = re.compile(
+    r'\b(STACK\d+|' + '|'.join(sorted(GP_REGS, key=len, reverse=True)) + r')\b')
+
+def _substitute_ast_str(ast_str, prefix_reg_values, stack_map):
+    """Substitute prefix Triton state into a suffix AST string.
+
+    Single-pass regex: replaces STACK aliases with actual memory values
+    and register names with prefix output values simultaneously.
+    """
+    def _replace(m):
+        token = m.group(1)
+        if token.startswith('STACK'):
+            idx = int(token[5:])
+            return stack_map.get(idx, token)
+        return prefix_reg_values.get(token, token)
+    return _COMPOSE_SUB_RE.sub(_replace, ast_str)
+
 # Segment registers — not symbolized by Triton, so their concrete values
 # (default 0) are unreliable.  Gadgets reading these should not be treated
 # as defining a GP register to a known constant.
@@ -185,6 +208,19 @@ def _extract_reg_offset(ast_str):
 
     return None, 0
 
+def _parse_mem_region_var(ast_str):
+    """Parse a memory region variable like 'RDI2' -> ('rdi', 0x10).
+
+    Returns (src_reg, byte_offset) if the string is exactly a memory
+    region alias ({REG_UPPER}{DIGIT}), otherwise (None, 0).
+    """
+    s = ast_str.strip()
+    for reg in GP_REGS:
+        prefix = reg.upper()
+        if s.startswith(prefix) and s[len(prefix):].isdigit():
+            return reg, int(s[len(prefix):]) * 8
+    return None, 0
+
 def regx86_64(reg):
     regs = {
         'rax': ['al', 'ah', 'ax', 'eax', 'rax'],
@@ -275,6 +311,147 @@ class Gadget(object):
         newd['is_asted'] = False
         return newd
 
+    def _compose_from_suffix(self, ctx, astCtxt, suffix, sp, regs, used_regs):
+        """Compose this gadget from prefix Triton state + suffix's analyzed fields."""
+
+        # Build stack_map: read actual Triton memory at suffix's stack positions.
+        # Handles pushes (prefix wrote register values onto stack) and pops
+        # (suffix reads higher original STACK slots) correctly.
+        max_stack_idx = -1
+        all_suffix_strs = list(suffix.regAst_str.values())
+        if suffix.end_ast_str:
+            all_suffix_strs.append(suffix.end_ast_str)
+        for s in all_suffix_strs:
+            for m in _STACK_ALIAS_RE.finditer(s):
+                idx = int(m.group(1))
+                if idx > max_stack_idx:
+                    max_stack_idx = idx
+        stack_map = {}
+        for i in range(max_stack_idx + 1):
+            addr = sp + i * 8
+            mem_ast = ctx.getMemoryAst(MemoryAccess(addr, CPUSIZE.QWORD))
+            stack_map[i] = str(astCtxt.unroll(mem_ast))
+
+        # Read prefix register values from Triton
+        prefix_reg_values = {}
+        for reg in regs:
+            if reg in used_regs:
+                sym = ctx.getSymbolicRegister(getTritonReg(ctx, reg))
+                prefix_reg_values[reg] = str(astCtxt.unroll(sym.getAst()))
+            else:
+                prefix_reg_values[reg] = reg
+
+        # regAst_str: substitute into suffix ASTs
+        self.regAst_str = {}
+        for reg, ast_str in suffix.regAst_str.items():
+            self.regAst_str[reg] = _substitute_ast_str(ast_str, prefix_reg_values, stack_map)
+        # Prefix-written regs not overwritten by suffix
+        for reg in self.written_regs:
+            if reg not in suffix.written_regs and reg not in self.regAst_str:
+                self.regAst_str[reg] = prefix_reg_values.get(reg, reg)
+
+        # defined_regs from regAst_str
+        self.defined_regs = {}
+        for reg, ast_str in self.regAst_str.items():
+            if ast_str in GP_REGS:
+                self.defined_regs[reg] = ast_str
+            else:
+                try:
+                    self.defined_regs[reg] = int(ast_str, 0)
+                except (ValueError, TypeError):
+                    pass
+
+        # Merge prefix + suffix tracked fields
+        self.written_regs |= suffix.written_regs
+        self.popped_regs |= suffix.popped_regs
+        self.read_regs |= suffix.read_regs
+        defregs = {r for r, v in self.defined_regs.items() if isinstance(v, int)}
+        self.depends_regs = self.read_regs - defregs
+        self.diff_sp = (sp - STACK) + suffix.diff_sp
+        self.is_memory_write += suffix.is_memory_write
+        self.is_memory_read = max(self.is_memory_read, suffix.is_memory_read)
+        self.is_syscall = self.is_syscall or suffix.is_syscall
+
+        # End fields (substitute register names in end_ast_str)
+        self.end_type = suffix.end_type
+        self.end_ast = None
+        self.end_ast_str = (_substitute_ast_str(suffix.end_ast_str, prefix_reg_values, stack_map)
+                            if suffix.end_ast_str else None)
+        self.end_reg_used = set(suffix.end_reg_used)
+
+        # Pivot detection from Triton state.
+        # If prefix made rsp symbolic (e.g. pop rsp loaded a pushed value),
+        # detect pivot directly from Triton rather than copying suffix's fields.
+        self.pivot = 0
+        self.pivot_ast = None
+        self.pivot_indirect = 0
+        self.pivot_mem_ast = None
+        self.pivot_src_reg = None
+        self.pivot_offset = 0
+        if ctx.isRegisterSymbolized(ctx.registers.rsp):
+            rsp_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
+            # Adjust for suffix's stack consumption. diff_sp excludes ret's pop,
+            # so: post_gadget_rsp = prefix_rsp + diff_sp + 8.
+            # Regular code: pivot_ast = post_rsp - 8 = prefix_rsp + diff_sp.
+            adj = suffix.diff_sp
+            if adj != 0:
+                adjusted = astCtxt.bvadd(rsp_ast, astCtxt.bv(adj, 64))
+            else:
+                adjusted = rsp_ast
+            self.pivot_ast = ctx.simplify(adjusted, True)
+            if self.pivot_ast:
+                pivot_str = str(self.pivot_ast)
+                childs = astCtxt.search(self.pivot_ast, AST_NODE.VARIABLE)
+                for c in childs:
+                    alias = c.getSymbolicVariable().getAlias()
+                    for reg in regs:
+                        rpfx = reg.upper()
+                        if alias.startswith(rpfx) and alias[len(rpfx):].isdigit():
+                            slot = int(alias[len(rpfx):])
+                            if pivot_str.strip() == alias:
+                                self.pivot_indirect = 1
+                                self.pivot_src_reg = reg
+                                self.pivot_offset = slot * 8
+                            break
+                    if self.pivot_indirect:
+                        break
+                if not self.pivot_indirect:
+                    self.pivot_src_reg, self.pivot_offset = _extract_reg_offset(pivot_str)
+                    if self.pivot_offset == STACK:
+                        self.pivot_src_reg = None
+                        self.pivot_offset = 0
+                if self.pivot_src_reg is not None:
+                    self.pivot = 1
+                else:
+                    self.pivot_ast = None
+        elif suffix.pivot and suffix.pivot_src_reg:
+            # Suffix itself is a pivot (rsp not symbolic from prefix) —
+            # transform suffix's pivot source through prefix register state.
+            # E.g., prefix "mov rdi, rsi" + suffix pivot from rdi → composed pivot from rsi.
+            mapped = prefix_reg_values.get(suffix.pivot_src_reg, suffix.pivot_src_reg)
+            new_reg, new_off = _extract_reg_offset(mapped)
+            if new_reg is not None:
+                self.pivot = 1
+                self.pivot_indirect = suffix.pivot_indirect
+                self.pivot_src_reg = new_reg
+                self.pivot_offset = suffix.pivot_offset + new_off
+            else:
+                # Check if prefix loaded from a memory region variable
+                # (e.g. prefix "mov rdx, [rdi+0x10]" → rdx='RDI2').
+                # A direct suffix pivot from rdx becomes indirect pivot from rdi.
+                mem_reg, mem_off = _parse_mem_region_var(mapped)
+                if mem_reg is not None:
+                    self.pivot = 1
+                    self.pivot_indirect = 1
+                    self.pivot_src_reg = mem_reg
+                    self.pivot_offset = mem_off + suffix.pivot_offset
+
+        self.memory_write_ast = []
+        self.regAst = {}
+        self.side_effect_score = _compute_side_effect_score(self.insstr)
+        self.is_analyzed = True
+        self.is_asted = False
+
     def buildAst(self):
         # Re-analyze the gadget to rebuild AST nodes (safe alternative to eval)
         self.written_regs = set()
@@ -337,12 +514,15 @@ class Gadget(object):
         instructions = self.insns
         pc = 0
         _seg_tainted = set()  # GP regs tainted by segment register reads
+        insstr_parts = self.insstr.split(' ; ')
+        insn_idx = 0
 
         while True:
             inst = Instruction()
             inst.setOpcode(instructions[pc:pc+16])
             inst.setAddress(pc)
             ctx.processing(inst)
+            insn_idx += 1
 
             written = inst.getWrittenRegisters()
             red = inst.getReadRegisters()
@@ -416,6 +596,18 @@ class Gadget(object):
             sp = ctx.getConcreteRegisterValue(ctx.registers.rsp)
             if pc >= len(instructions):
                 break
+
+            # Check suffix dict for early exit
+            if _suffix_dict is not None and insn_idx < len(insstr_parts):
+                remaining = ' ; '.join(insstr_parts[insn_idx:])
+                suffix = _suffix_dict.get(remaining)
+                if suffix is not None and suffix.is_analyzed:
+                    if suffix.end_type == TYPE_UNKNOWN:
+                        self.end_type = TYPE_UNKNOWN
+                        self.is_analyzed = True
+                        return
+                    self._compose_from_suffix(ctx, astCtxt, suffix, sp, regs, used_regs)
+                    return
 
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
             rsp_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
