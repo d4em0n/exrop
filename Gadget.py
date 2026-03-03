@@ -52,6 +52,14 @@ _MEM_DEST_RE = re.compile(
     r'\w+\s+ptr\s+\[([^\]]+)\]')
 _CONST_OFFSET_RE = re.compile(r'[+-]\s*(?:0x)?([0-9a-fA-F]+)')
 
+# Gadget endings that are never useful for ROP/JOP chaining:
+#  - jmp/call to a constant address (not controllable)
+#  - ret with non-zero immediate (pops extra bytes, breaks chain layout)
+_SKIP_GADGET_RE = re.compile(
+    r'(?:jmp|call)\s+0x[0-9a-fA-F]+$|'
+    r'ret\s+(?:0x[0-9a-fA-F]+|[1-9]\d*)$'
+)
+
 def _compute_side_effect_score(insstr):
     """Score indicating danger from side-effect memory writes.
 
@@ -294,6 +302,13 @@ class Gadget(object):
 
 
     def analyzeGadget(self, debug=False):
+        # Skip gadgets with unusable endings before creating TritonContext
+        last_insn = self.insstr.rsplit(';', 1)[-1].strip()
+        if _SKIP_GADGET_RE.search(last_insn):
+            self.end_type = TYPE_UNKNOWN
+            self.is_analyzed = True
+            return
+
         BSIZE = 8
         ctx = initialize()
         astCtxt = ctx.getAstContext()
@@ -437,21 +452,45 @@ class Gadget(object):
                 else:
                     self.pivot_ast = None
 
+        _regs_upper = {r.upper() for r in regs}
         for reg in self.written_regs:
-            self.regAst[reg] = ctx.simplify(ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst(), True)
+            raw_ast = ctx.getSymbolicRegister(getTritonReg(ctx, reg)).getAst()
+            unrolled = astCtxt.unroll(raw_ast)
             # Skip registers tainted by segment register reads — their
             # concrete value (Triton default 0) is not reliable.
             if reg in _seg_tainted:
+                self.regAst[reg] = unrolled
                 continue
-            simplified = str(self.regAst[reg])
+            simplified = str(unrolled)
             if simplified in regs:
+                self.regAst[reg] = unrolled
                 self.defined_regs[reg] = simplified
                 continue
             try:
                 h = int(simplified, 16)
+                self.regAst[reg] = unrolled
                 self.defined_regs[reg] = h
-            except ValueError:
                 continue
+            except ValueError:
+                pass
+            # Check if it's a known variable alias (STACK_N or REG_N like RDI0).
+            # These are already resolved — Z3 can't simplify further.
+            _alias = simplified.rstrip('0123456789')
+            if _alias == 'STACK' or _alias in _regs_upper:
+                self.regAst[reg] = unrolled
+                continue
+            # Complex expression — fall back to Z3 for constant folding
+            # (e.g. xor eax,eax -> 0x0, lea rdx,[rdi+0x20] -> rdi + 0x20)
+            z3_ast = ctx.simplify(raw_ast, True)
+            self.regAst[reg] = z3_ast
+            simplified = str(z3_ast)
+            if simplified in regs:
+                self.defined_regs[reg] = simplified
+            else:
+                try:
+                    self.defined_regs[reg] = int(simplified, 16)
+                except ValueError:
+                    pass
 
         defregs = set(filter(lambda i: isinstance(self.defined_regs[i],int),
                               self.defined_regs.keys()))

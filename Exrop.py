@@ -91,7 +91,10 @@ class Exrop(object):
             print("Thunk rewrite: {} -> {} gadgets".format(before, len(gadgets)))
 
         self.chain_builder.load_list_gadget_string(gadgets)
+        import time as _time
+        _t0 = _time.time()
         self.chain_builder.analyzeAll(num_process)
+        print("Analyzed {} gadgets in {:.2f}s".format(len(gadgets), _time.time() - _t0))
         if cache:
             objpic = self.chain_builder.save_analyzed_gadgets()
             with open(fcname, "wb") as fc:
