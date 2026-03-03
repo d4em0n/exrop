@@ -44,7 +44,7 @@ def load_and_run(test_name):
 
     chain_builder = ChainBuilder()
     chain_builder.load_list_gadget_string(gadgets)
-    chain_builder.analyzeAll()
+    chain_builder.analyzeAll(num_process=1)
 
     test_type = data_test.get('type', 'reg')
     avoid_char = data_test.get('badchars', None)
