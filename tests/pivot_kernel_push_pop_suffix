@@ -1,14 +1,14 @@
 {
     "type": "pivot_reg",
     "gadgets": {
-        0x4000: 'pop rbp; ret',
-        0x4001: 'pop r14; pop rbp; ret',
-        0x4002: 'pop r13; pop r14; pop rbp; ret',
-        0x4003: 'pop rsp; pop r13; pop r14; pop rbp; ret',
-        0x4004: 'pop rax; ret',
-        0x4005: 'mov rcx, rdx; pop rbp; ret',
-        0x4006: 'xor rbx, rbx; pop r14; pop rbp; ret',
-        0x4010: 'push rsi; or byte ptr [rbx + 0x41], bl; pop rsp; pop r13; pop r14; pop rbp; ret',
+        0x4000: 'pop rbp ; ret',
+        0x4001: 'pop r14 ; pop rbp ; ret',
+        0x4002: 'pop r13 ; pop r14 ; pop rbp ; ret',
+        0x4003: 'pop rsp ; pop r13 ; pop r14 ; pop rbp ; ret',
+        0x4004: 'pop rax ; ret',
+        0x4005: 'mov rcx, rdx ; pop rbp ; ret',
+        0x4006: 'xor rbx, rbx ; pop r14 ; pop rbp ; ret',
+        0x4010: 'push rsi ; or byte ptr [rbx + 0x41], bl ; pop rsp ; pop r13 ; pop r14 ; pop rbp ; ret',
     },
     "find": "rsi",
     "expect": {
