@@ -88,7 +88,7 @@ def test_gadget_chain(test_name):
             assert pivot.src_reg == expect['src_reg'], f"Expected src_reg {expect['src_reg']}, got {pivot.src_reg}"
             if 'offset' in expect:
                 assert pivot.offset == expect['offset'], f"Expected offset {expect['offset']}, got {pivot.offset}"
-            if expect.get('pivot_type') in ('jop', 'jop_indirect'):
+            if expect.get('pivot_type') in ('jop', 'jop_indirect', 'jop_push'):
                 assert pivot.jop_gadget is not None, f"Expected jop_gadget for {test_name}"
                 assert pivot.pivot_gadget is not None, f"Expected pivot_gadget for {test_name}"
                 if 'dispatch_offset' in expect:

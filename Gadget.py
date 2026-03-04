@@ -275,6 +275,8 @@ class Gadget(object):
         self.pivot_mem_ast = None  # AST of the memory address for indirect pivot
         self.pivot_src_reg = None  # source register name for pivot ('rdi', 'rsi', etc.)
         self.pivot_offset = 0     # offset from src_reg
+        self.pivot_stack_slot = None  # int: STACK slot number if RSP comes from stack
+        self.stack_reg_writes = {}    # {slot: (reg, offset)} GP reg values pushed to stack
         self.is_syscall = False
         self.side_effect_score = 0  # max large-offset memory write (0 = clean)
 
@@ -388,6 +390,8 @@ class Gadget(object):
         self.pivot_mem_ast = None
         self.pivot_src_reg = None
         self.pivot_offset = 0
+        self.pivot_stack_slot = None
+        self.stack_reg_writes = {}
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
             rsp_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
             # Adjust for suffix's stack consumption. diff_sp excludes ret's pop,
@@ -423,7 +427,12 @@ class Gadget(object):
                 if self.pivot_src_reg is not None:
                     self.pivot = 1
                 else:
-                    self.pivot_ast = None
+                    m = re.match(r'^STACK(\d+)$', pivot_str.strip())
+                    if m:
+                        self.pivot = 1
+                        self.pivot_stack_slot = int(m.group(1))
+                    else:
+                        self.pivot_ast = None
         elif suffix.pivot and suffix.pivot_src_reg:
             # Suffix itself is a pivot (rsp not symbolic from prefix) —
             # transform suffix's pivot source through prefix register state.
@@ -445,6 +454,24 @@ class Gadget(object):
                     self.pivot_indirect = 1
                     self.pivot_src_reg = mem_reg
                     self.pivot_offset = mem_off + suffix.pivot_offset
+
+        # Scan stack below STACK for GP register values pushed by the prefix.
+        # Use composed SP (prefix sp + suffix consumption) as the effective base.
+        self.stack_reg_writes = {}
+        compose_sp = STACK + self.diff_sp  # net SP before dispatch
+        effective_sp = compose_sp
+        if self.end_type in (TYPE_CALL_REG, TYPE_CALL_MEM):
+            effective_sp = compose_sp - 8
+        if effective_sp < STACK:
+            n_slots = (STACK - effective_sp) // 8
+            if n_slots <= 16:
+                for slot in range(n_slots):
+                    addr = effective_sp + slot * 8
+                    mem_ast = ctx.getMemoryAst(MemoryAccess(addr, CPUSIZE.QWORD))
+                    mem_str = str(astCtxt.unroll(mem_ast))
+                    reg, off = _extract_reg_offset(mem_str)
+                    if reg and reg in regs:
+                        self.stack_reg_writes[slot] = (reg, off)
 
         self.memory_write_ast = []
         self.regAst = {}
@@ -472,6 +499,8 @@ class Gadget(object):
         self.pivot_mem_ast = None
         self.pivot_src_reg = None
         self.pivot_offset = 0
+        self.pivot_stack_slot = None
+        self.stack_reg_writes = {}
         self.is_syscall = False
         self.is_analyzed = False
         self.is_asted = False
@@ -642,7 +671,13 @@ class Gadget(object):
                 if self.pivot_src_reg is not None:
                     self.pivot = 1
                 else:
-                    self.pivot_ast = None
+                    # Check for STACK_N pivot (e.g., pop rsp ; ret)
+                    m = re.match(r'^STACK(\d+)$', pivot_str.strip())
+                    if m:
+                        self.pivot = 1
+                        self.pivot_stack_slot = int(m.group(1))
+                    else:
+                        self.pivot_ast = None
 
         _regs_upper = {r.upper() for r in regs}
         for reg in self.written_regs:
@@ -693,6 +728,25 @@ class Gadget(object):
         self.end_ast_str = str(self.end_ast) if self.end_ast else None
 
         self.diff_sp = sp - STACK
+
+        # Scan stack below STACK for GP register values pushed by the gadget.
+        # For call endings, account for the return address push (sp - 8).
+        # Limit scan to 16 slots to avoid runaway on leave/mov rsp instructions.
+        self.stack_reg_writes = {}
+        effective_sp = sp
+        if self.end_type in (TYPE_CALL_REG, TYPE_CALL_MEM):
+            effective_sp = sp - 8
+        if effective_sp < STACK:
+            n_slots = (STACK - effective_sp) // 8
+            if n_slots <= 16:
+                for slot in range(n_slots):
+                    addr = effective_sp + slot * 8
+                    mem_ast = ctx.getMemoryAst(MemoryAccess(addr, CPUSIZE.QWORD))
+                    mem_str = str(astCtxt.unroll(mem_ast))
+                    reg, off = _extract_reg_offset(mem_str)
+                    if reg and reg in regs:
+                        self.stack_reg_writes[slot] = (reg, off)
+
         self.side_effect_score = _compute_side_effect_score(self.insstr)
         self.is_analyzed = True
         self.is_asted = True
