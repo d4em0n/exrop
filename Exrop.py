@@ -54,25 +54,27 @@ class Exrop(object):
         return self.thunk_config
 
     def find_gadgets(self, cache=False, add_opt="", num_process=None, depth=None, kernel_mode=False):
-        if kernel_mode:
-            self.detect_kernel()
-            self.thunk_config.summary()
-            if depth is None:
-                depth = 15
+        if kernel_mode and depth is None:
+            depth = 15 # kernel_mode uses higher depth
 
         # Build cache filename
         if cache:
-            thunk_suffix = "_kernel" if self.thunk_config else ""
+            thunk_suffix = "_kernel" if kernel_mode else ""
             suffix = "" if depth is None else "_d{}".format(depth)
             fcname = "./{}{}{}.exrop_cache".format(
                 self.binary.replace("/", "_"), thunk_suffix, suffix)
             try:
                 with open(fcname, "rb") as fc:
+                    print("Loading cache from {}".format(fcname))
                     objpic = fc.read()
                     self.chain_builder.load_analyzed_gadgets(objpic)
                     return
             except FileNotFoundError:
                 pass
+
+        if kernel_mode:
+            self.detect_kernel()
+            self.thunk_config.summary()
 
         # Auto-set --range from .text section for kernel mode
         if self.thunk_config and self.thunk_config.text_range:
