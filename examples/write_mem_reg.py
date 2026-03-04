@@ -95,3 +95,32 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# Output (abbreviated — all 22 tests pass):
+# Test  1: *(rdi) = 0x41414141                        ... PASS (0.496s, 24 bytes)
+# $RSP+0x0000 : 0x00000000000a877e # pop rcx ; ret
+# $RSP+0x0008 : 0x0000000041414141
+# $RSP+0x0010 : 0x00000000000bf466 # mov qword ptr [rdi], rcx ; ret
+#
+# Test 12: *(rdi) = rax                               ... PASS (0.010s, 8 bytes)
+# $RSP+0x0000 : 0x0000000000045c63 # mov qword ptr [rdi], rax ; xor eax, eax ; ret
+#
+# Test 17: *(rcx) = rbx                               ... PASS (5.512s, 56 bytes)
+# $RSP+0x0000 : 0x00000000000584d9 # pop r13 ; ret
+# $RSP+0x0008 : 0x00000000000dd237
+# $RSP+0x0010 : 0x0000000000125001 # mov rsi, rbx ; call r13: next -> (0x000dd237) # pop rax ; ret
+# $RSP+0x0018 : 0x00000000000584d9 # pop r13 ; ret
+# $RSP+0x0020 : 0x00000000000dd237
+# $RSP+0x0028 : 0x0000000000156eb7 # mov rdx, rsi ; mov esi, r12d ; call r13: next -> (0x000dd237) # pop rax ; ret
+# $RSP+0x0030 : 0x000000000009a087 # mov qword ptr [rcx], rdx ; ret
+#
+# Test 22: *(rdi)=0xAA + *(rsi)=0xBB                  ... PASS (0.458s, 48 bytes)
+# $RSP+0x0000 : 0x00000000000a877e # pop rcx ; ret
+# $RSP+0x0008 : 0x00000000aaaaaaaa
+# $RSP+0x0010 : 0x00000000000bf466 # mov qword ptr [rdi], rcx ; ret
+# $RSP+0x0018 : 0x000000000010f78b # pop rdi ; ret
+# $RSP+0x0020 : 0x00000000bbbbbbbb
+# $RSP+0x0028 : 0x000000000013b991 # mov qword ptr [rsi], rdi ; ret
+#
+# ============================================================
+# Results: 22 passed, 0 failed, 0 timeout out of 22
