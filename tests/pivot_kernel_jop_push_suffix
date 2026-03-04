@@ -1,0 +1,20 @@
+{
+    "type": "pivot_reg",
+    "gadgets": {
+        # Step 1: push rdi, then dispatch via memory load.
+        # The suffix "mov rax, [rdi+0x10] ; call rax" is a separate gadget,
+        # so ChainBuilder builds it first, enabling suffix-based composition
+        # for the longer gadget.
+        0x4000: 'push rdi ; mov rax, qword ptr [rdi+0x10] ; call rax',
+        0x4002: 'mov rax, qword ptr [rdi+0x10] ; call rax',
+        # Pivot: skip return address (pop rcx), then pop rsp from pushed rdi
+        0x5000: 'pop rcx ; pop rsp ; ret',
+    },
+    "find": "rdi",
+    "expect": {
+        "pivot_type": "jop_push",
+        "src_reg": "rdi",
+        "dispatch_offset": 0x10,
+        "chain_offset": 0x0
+    }
+}
