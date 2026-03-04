@@ -590,6 +590,34 @@ def solveWriteGadgets(gadgets, solves, avoid_char=None):
             if _try_write_gadgets(gadgets, candidates[w], solves, regs, ctx, chains, fwd_level=level, avoid_char=avoid_char):
                 return chains
 
+def findStackShift(gadgets, shift_bytes, avoid_char=None):
+    """Find gadgets that shift RSP by exactly shift_bytes before returning.
+
+    A shift gadget consumes shift_bytes of stack space beyond its own
+    address slot, e.g. 'add rsp, 0x28 ; ret' has diff_sp=0x28.
+
+    Rejects gadgets using 32-bit stack operations (esp) since those
+    zero-extend and destroy the upper 32 bits of RSP.
+
+    Returns list of Gadget objects sorted by (side_effect_score, written_regs count).
+    """
+    candidates = []
+    for gadget in gadgets:
+        if gadget.end_type != TYPE_RETURN:
+            continue
+        if gadget.diff_sp != shift_bytes:
+            continue
+        if avoid_char and _has_badchar(gadget.addr, avoid_char):
+            continue
+        # Reject 32-bit stack ops: 'add esp', 'lea esp', 'sub esp' etc.
+        # These zero-extend RSP, destroying the upper 32 bits.
+        if ' esp' in gadget.insstr:
+            continue
+        candidates.append(gadget)
+    candidates.sort(key=lambda g: (g.side_effect_score, len(g.written_regs)))
+    return candidates
+
+
 def findPivotForReg(gadgets, src_reg, avoid_char=None):
     """Find pivot gadgets that redirect rsp from a specific register.
 
