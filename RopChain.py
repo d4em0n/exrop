@@ -274,6 +274,28 @@ class RopChain(object):
             self.append(chain)
         return True
 
+    def evict_clobbered(self):
+        """Remove later chains that clobber an earlier chain's solved_regs.
+
+        Returns set of solved_regs from removed chains."""
+        evicted = set()
+        changed = True
+        while changed:
+            changed = False
+            for i in range(len(self.chains)):
+                written_after = self.get_written_regs(i+1)
+                clobbered = self.chains[i].solved_regs & written_after
+                if clobbered:
+                    # Find the last chain that does the clobbering
+                    for j in range(len(self.chains)-1, i, -1):
+                        if self.chains[i].solved_regs & self.chains[j].written_regs:
+                            evicted.update(self.chains[j].solved_regs)
+                            self.chains.pop(j)
+                            changed = True
+                            break
+                    break
+        return evicted
+
     def get_solved_regs(self, start_chain=None, end_chain=None):
         regs_solved = set()
         chains = self.chains[start_chain:end_chain]

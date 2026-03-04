@@ -1,0 +1,26 @@
+{
+    "gadgets": {
+        0x1000: 'pop rax ; ret',
+        0x1001: 'pop rdx ; ret',
+        0x1002: 'pop rcx ; ret',
+        0x1003: 'pop rbx ; ret',
+        0x1004: 'pop rbp ; ret',
+        0x1005: 'pop rsi ; ret',
+        0x1006: 'pop rdi ; ret',
+        0x1010: 'mov edx, ebx ; ret',
+        0x1011: 'add ebp, edx ; xor eax, eax ; ret',
+        0x1012: 'xchg ebp, eax ; ret',
+        0x1013: 'xchg esi, eax ; ret',
+        0x1014: 'add eax, edx ; ret',
+        0x1015: 'add edx, ecx ; mov eax, edx ; ret',
+        0x1020: 'add ebx, ecx ; pop rbp ; ret',
+        0x1021: 'xchg eax, ebx ; pop rbp ; ret',
+        0x1022: 'mov eax, ebp ; pop rbp ; ret',
+    },
+    "find": {
+        "rsi": 0x0a0a0a0a,
+        "rax": 0x0b0b0b0b,
+        "rdx": 0x0c0c0c0c,
+    },
+    "badchars": b"\x0a\x0b\x0c",
+}
