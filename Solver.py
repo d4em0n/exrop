@@ -931,6 +931,16 @@ def findJopPivotCandidates(gadgets, src_reg, avoid_char=None, used_dispatch=None
             if chain_result is None:
                 continue
             steps, value_offset, is_mem = chain_result
+            # Reject indirect results where the chain pointer slot
+            # collides with a dispatch slot.  This happens when the JOP
+            # gadget uses the same register for both dispatch and value
+            # (e.g., `mov rax, [rdi+8]; call rax` where the pivot reads
+            # rax).  The slot holds the dispatch address at runtime, so
+            # it can't simultaneously be a chain pointer.
+            if is_mem:
+                dispatch_offsets = {off for _, off in steps}
+                if value_offset in dispatch_offsets:
+                    continue
             # Deduplicate: skip if same entry gadget already found
             entry_key = tuple(g.addr for g, _ in steps)
             if entry_key in seen_steps:
