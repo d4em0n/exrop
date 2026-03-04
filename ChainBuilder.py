@@ -45,6 +45,9 @@ class ChainBuilder(object):
     def solve_pivot_reg(self, src_reg, avoid_char=None, used_dispatch=None):
         return solvePivotForReg(self._get_gadgets(), src_reg, avoid_char, used_dispatch=used_dispatch)
 
+    def find_stack_shift(self, shift_bytes, avoid_char=None):
+        return findStackShift(self._get_gadgets(), shift_bytes, avoid_char)
+
     def build_chain(self, next_call=None):
         if next_call:
             self.raw_chain.set_next_call(next_call)

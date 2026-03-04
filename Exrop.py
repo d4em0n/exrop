@@ -125,6 +125,21 @@ class Exrop(object):
         """
         return self.chain_builder.solve_pivot_reg(reg_name, avoid_char, used_dispatch=used_dispatch)
 
+    def find_stack_shift(self, shift_bytes, avoid_char=None):
+        """Find gadgets that shift RSP by exactly shift_bytes before returning.
+
+        Useful for inserting into ROP chains to skip over reserved object
+        offsets (e.g., vtable pointers) when the chain is embedded inline.
+
+        Args:
+            shift_bytes: Number of bytes to skip (must be multiple of 8).
+            avoid_char: Bytes to avoid in gadget addresses.
+
+        Returns:
+            List of Gadget objects sorted by preference (cleanest first).
+        """
+        return self.chain_builder.find_stack_shift(shift_bytes, avoid_char)
+
     def set_regs(self, regs, next_call=None, avoid_char=None):
         self.chain_builder.set_regs(regs)
         self.chain_builder.solve_chain(avoid_char)
