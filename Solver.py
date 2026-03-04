@@ -947,7 +947,15 @@ def findJopPivotCandidates(gadgets, src_reg, avoid_char=None, used_dispatch=None
                 continue
             seen_steps.add(entry_key)
             for pivot_gadget in pivot_list:
-                chain_offset = value_offset + getattr(pivot_gadget, 'pivot_offset', 0)
+                pivot_off = getattr(pivot_gadget, 'pivot_offset', 0)
+                if is_mem:
+                    # Indirect: value_offset is the pointer slot in the
+                    # object.  pivot_offset affects the chain buffer
+                    # layout (padding before first gadget), not the
+                    # object layout.
+                    chain_offset = value_offset
+                else:
+                    chain_offset = value_offset + pivot_off
                 if chain_offset < 0:
                     continue
                 results.append((steps, pivot_gadget, chain_offset, is_mem, None))
