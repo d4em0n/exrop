@@ -168,11 +168,16 @@ class PivotInfo(object):
                 }
             else:  # jop_indirect
                 ptr_offset = self.chain_offset_computed
+                pivot_off = getattr(self.pivot_gadget, 'pivot_offset', 0)
                 # Find safe location for chain data after all used slots
                 max_used = max(off + 8 for off, _ in self.dispatch_entries)
                 chain_data_start = max(max_used, ptr_offset + 8)
+                # Pointer in object points to the chain buffer start.
+                # The pivot's extra pops consume pivot_offset bytes of
+                # padding before ret hits the first real gadget.
                 struct.pack_into('<Q', obj, ptr_offset, chain_data_start)
-                obj[chain_data_start:chain_data_start + len(chain_bytes)] = chain_bytes
+                padded_chain = b'\x00' * pivot_off + chain_bytes
+                obj[chain_data_start:chain_data_start + len(padded_chain)] = padded_chain
                 desc_parts = []
                 for off, addr in self.dispatch_entries:
                     desc_parts.append("0x{:x} at object+0x{:x}".format(addr, off))
@@ -180,6 +185,7 @@ class PivotInfo(object):
                     'func_ptr': self.jop_gadget.addr,
                     'obj_layout': bytes(obj),
                     'chain_offset': chain_data_start,
+                    'pivot_offset': pivot_off,
                     'ptr_offset': ptr_offset,
                     'dispatch_entries': list(self.dispatch_entries),
                     'description': (

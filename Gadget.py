@@ -47,6 +47,11 @@ _suffix_dict = None
 _STACK_ALIAS_RE = re.compile(r'STACK(\d+)')
 _COMPOSE_SUB_RE = re.compile(
     r'\b(STACK\d+|' + '|'.join(sorted(GP_REGS, key=len, reverse=True)) + r')\b')
+# Memory-region variable pattern (e.g. RDI5, RAX3, R150) for detecting when
+# suffix AST strings reference a register's memory region that was overwritten
+# by the prefix — in which case suffix composition is invalid.
+_MEM_REGION_RE = re.compile(
+    r'\b(' + '|'.join(sorted((r.upper() for r in GP_REGS), key=len, reverse=True)) + r')\d+\b')
 
 def _substitute_ast_str(ast_str, prefix_reg_values, stack_map):
     """Substitute prefix Triton state into a suffix AST string.
@@ -314,7 +319,11 @@ class Gadget(object):
         return newd
 
     def _compose_from_suffix(self, ctx, astCtxt, suffix, sp, regs, used_regs):
-        """Compose this gadget from prefix Triton state + suffix's analyzed fields."""
+        """Compose this gadget from prefix Triton state + suffix's analyzed fields.
+
+        Returns True if composition succeeded, False if suffix can't be reused
+        (e.g., prefix overwrites a register whose memory region the suffix reads).
+        """
 
         # Build stack_map: read actual Triton memory at suffix's stack positions.
         # Handles pushes (prefix wrote register values onto stack) and pops
@@ -342,6 +351,20 @@ class Gadget(object):
                 prefix_reg_values[reg] = str(astCtxt.unroll(sym.getAst()))
             else:
                 prefix_reg_values[reg] = reg
+
+        # Check: reject if suffix AST strings reference memory region variables
+        # (e.g. RDI5) for registers overwritten by the prefix.  The suffix was
+        # analyzed with original register values, so its memory slots are wrong
+        # when the prefix changes the base register (double-dereference case:
+        # e.g. "mov rdi,[rdi+0x18]; mov rax,[rdi+0x28]" — suffix has rax=RDI5
+        # but it should be [[rdi+0x18]+0x28]).
+        overwritten_upper = {reg.upper() for reg, val in prefix_reg_values.items()
+                             if val != reg}
+        if overwritten_upper:
+            for s in all_suffix_strs:
+                for m in _MEM_REGION_RE.finditer(s):
+                    if m.group(1) in overwritten_upper:
+                        return False
 
         # regAst_str: substitute into suffix ASTs
         self.regAst_str = {}
@@ -478,6 +501,7 @@ class Gadget(object):
         self.side_effect_score = _compute_side_effect_score(self.insstr)
         self.is_analyzed = True
         self.is_asted = False
+        return True
 
     def buildAst(self):
         # Re-analyze the gadget to rebuild AST nodes (safe alternative to eval)
@@ -635,8 +659,10 @@ class Gadget(object):
                         self.end_type = TYPE_UNKNOWN
                         self.is_analyzed = True
                         return
-                    self._compose_from_suffix(ctx, astCtxt, suffix, sp, regs, used_regs)
-                    return
+                    if self._compose_from_suffix(ctx, astCtxt, suffix, sp, regs, used_regs):
+                        return
+                    # Suffix can't be reused (prefix overwrites a register whose
+                    # memory region the suffix reads) — continue Triton analysis
 
         if ctx.isRegisterSymbolized(ctx.registers.rsp):
             rsp_ast = ctx.getSymbolicRegister(ctx.registers.rsp).getAst()
