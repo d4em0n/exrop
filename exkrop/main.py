@@ -117,8 +117,12 @@ def _pivot_summary(pivot, idx):
     else:
         gadget_str = str(pivot.gadget)
         chain_off = pivot.offset
-    return "  [{:>2d}] {:<14s} @ 0x{:x} # {} (chain at +0x{:x})".format(
-        idx, ptype, addr, gadget_str, chain_off)
+    if ptype in ('indirect', 'jop_indirect'):
+        label = "ptr at"
+    else:
+        label = "chain at"
+    return "  [{:>2d}] {:<14s} @ 0x{:x} # {} ({} +0x{:x})".format(
+        idx, ptype, addr, gadget_str, label, chain_off)
 
 
 def choose_pivot(pivots):
