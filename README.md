@@ -19,7 +19,8 @@ Features:
 - syscall (`Exrop.syscall`)
 - kernel mode with automatic retpoline thunk rewriting (`kernel_mode=True`)
 - clean-only mode to filter out gadgets with dangerous side-effect memory writes
-- multiprocessing gadget analysis with progress bar
+- suffix-based early exit: composes multi-instruction gadgets from already-analyzed suffixes, skipping redundant Triton execution
+- multiprocessing gadget analysis with rounds-by-length strategy and progress bar
 - gadget caching (pickle) for fast re-use
 - see [examples](examples)
 

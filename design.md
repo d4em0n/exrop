@@ -79,6 +79,26 @@ side-effect memory writes. Instructions that write to memory at large constant o
 certainly hit unmapped memory and crash. The score is the max offset found; 0 means
 clean. Used by pivot sorting (clean gadgets first) and the `clean_only` filter.
 
+**Suffix-based early exit**: when a module-level `_suffix_dict` is populated (by
+`ChainBuilder.analyzeAll`), the analysis loop checks after each non-control-flow
+instruction whether the remaining instructions match an already-analyzed gadget.
+If a match is found and the suffix has `diff_sp >= 0` (i.e., RSP wasn't redirected
+by the suffix), the gadget composes its analysis from the live Triton state plus
+the suffix's stored results — avoiding re-executing the suffix through Triton.
+
+Composition (`_compose_from_suffix`) reads the prefix's symbolic register values
+from Triton, then substitutes them into the suffix's `regAst_str` and `end_ast_str`
+using single-pass regex replacement. Stack slot references (`STACK0`, `STACK1`, ...)
+are shifted by the prefix's stack consumption. Fields like `written_regs`,
+`popped_regs`, `read_regs`, `diff_sp`, pivot info, and end type are merged from
+both prefix execution and suffix analysis.
+
+The `diff_sp >= 0` guard is critical: suffixes containing `pop rsp` or `mov rsp, reg`
+produce very negative `diff_sp` values (e.g., -2147483368) because RSP is redirected
+away from the symbolic stack. Composing from such a suffix would produce garbage
+pivot and register ASTs. The guard forces fall-through to full Triton execution,
+where pivot detection handles RSP redirection correctly.
+
 After execution, for each written register:
 
 - `regAst[reg]` stores the full symbolic AST
@@ -103,7 +123,20 @@ filters out gadgets with `side_effect_score > 0` before passing them to any solv
 function. This removes ~7% of kernel gadgets that have dangerous side-effect memory
 writes, ensuring all gadgets in the resulting chain are safe to execute.
 
-**Multiprocessing**: `Pool.imap_unordered` parallelizes analysis across CPU cores.
+**Multiprocessing — rounds by instruction length**: `analyzeAll()` groups gadgets by
+instruction count and analyzes them in rounds (1-instruction first, then 2-instruction,
+etc.). Each round forks a new `Pool` that inherits the current `_suffix_dict` via
+copy-on-write. As each round completes, its analyzed gadgets are added to the dict,
+so the next round's workers have full suffix coverage for all shorter gadgets.
+
+This gives 100% suffix hit rate at every depth level. On vmlinux (~122k gadgets),
+suffix composition avoids redundant Triton execution for the majority of multi-
+instruction gadgets, reducing analysis time from ~163s to ~132s. On libc (~58k
+gadgets), analysis takes ~18s.
+
+In single-process mode (`num_process=1`), gadgets are sorted short-to-long and the
+suffix dict is built incrementally as each gadget is analyzed, achieving the same
+coverage without fork overhead.
 
 ## Solver Design (`Solver.py`)
 
