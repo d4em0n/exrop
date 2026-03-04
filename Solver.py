@@ -850,15 +850,20 @@ def findJopPivotCandidates(gadgets, src_reg, avoid_char=None, used_dispatch=None
 
     # Collect all ret-ending pivot gadgets (any pivot_src_reg)
     ret_pivots = []
+    stack_pivots = []  # STACK_N pivots: (gadget, slot)
     for gadget in gadgets:
         if avoid_char and _has_badchar(gadget.addr, avoid_char):
             continue
         if gadget.end_type != TYPE_RETURN:
             continue
-        if gadget.pivot and getattr(gadget, 'pivot_src_reg', None) is not None:
-            ret_pivots.append(gadget)
+        if gadget.pivot:
+            if getattr(gadget, 'pivot_src_reg', None) is not None:
+                ret_pivots.append(gadget)
+            elif getattr(gadget, 'pivot_stack_slot', None) is not None:
+                if gadget.side_effect_score == 0:
+                    stack_pivots.append((gadget, gadget.pivot_stack_slot))
 
-    if not ret_pivots:
+    if not ret_pivots and not stack_pivots:
         return []
 
     # Collect usable JOP gadgets and build index
@@ -907,11 +912,55 @@ def findJopPivotCandidates(gadgets, src_reg, avoid_char=None, used_dispatch=None
                 chain_offset = value_offset + getattr(pivot_gadget, 'pivot_offset', 0)
                 if chain_offset < 0:
                     continue
-                results.append((steps, pivot_gadget, chain_offset, is_mem))
+                results.append((steps, pivot_gadget, chain_offset, is_mem, None))
+
+    # Stack-push pivots: step 1 pushes a register, pivot pops it into RSP.
+    if stack_pivots:
+        # Collect JOP gadgets that push GP regs (allow memory writes from push)
+        push_jop_gadgets = []
+        for gadget in gadgets:
+            if avoid_char and _has_badchar(gadget.addr, avoid_char):
+                continue
+            srw = getattr(gadget, 'stack_reg_writes', {})
+            if not srw:
+                continue
+            if gadget.end_type not in (TYPE_JMP_MEM, TYPE_CALL_MEM, TYPE_JMP_REG, TYPE_CALL_REG):
+                continue
+            push_jop_gadgets.append(gadget)
+
+        for push_gadget in push_jop_gadgets:
+            srw = push_gadget.stack_reg_writes
+            disp_dep = _analyze_jop_dispatch(push_gadget, regs)
+            if disp_dep is None:
+                continue
+
+            for pivot_gadget, pivot_slot in stack_pivots:
+                if pivot_slot not in srw:
+                    continue
+                pushed_reg, push_offset = srw[pivot_slot]
+
+                # Pushed value must come from src_reg for the pivot to be useful
+                if pushed_reg != src_reg:
+                    continue
+
+                # Resolve dispatch offset from src_reg
+                disp_result = _resolve_offset(disp_dep, {src_reg: 0})
+                if disp_result is None:
+                    continue
+                disp_offset, _ = disp_result
+                if disp_offset < 0:
+                    continue
+                if used_dispatch and disp_offset in used_dispatch:
+                    continue
+
+                chain_offset = push_offset + getattr(pivot_gadget, 'pivot_offset', 0)
+                if chain_offset < 0:
+                    continue
+                results.append(([(push_gadget, disp_offset)], pivot_gadget, chain_offset, False, 'jop_push'))
 
     # Sort: prefer clean gadgets, shorter chains, direct over indirect, small offsets
     def _jop_score(r):
-        steps, pivot, off, is_mem = r
+        steps, pivot, off, is_mem = r[0], r[1], r[2], r[3]
         total = sum(g.side_effect_score for g, _ in steps) + pivot.side_effect_score
         return (total, len(steps), is_mem, abs(off))
     results.sort(key=_jop_score)
@@ -941,9 +990,11 @@ def solvePivotForReg(gadgets, src_reg, avoid_char=None, used_dispatch=None):
 
     # Phase 2: JOP-chained pivots (recursive search)
     jop_results = findJopPivotCandidates(gadgets, src_reg, avoid_char=avoid_char, used_dispatch=used_dispatch)
-    for jop_steps, pivot, chain_off, jop_indirect in jop_results:
+    for jop_steps, pivot, chain_off, jop_indirect, ptype in jop_results:
         info = PivotInfo.from_jop_chain(jop_steps, pivot, src_reg, chain_off, jop_indirect)
         if info is not None:
+            if ptype:
+                info.pivot_type = ptype
             results.append(info)
 
     return results

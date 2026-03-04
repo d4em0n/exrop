@@ -93,13 +93,20 @@ class PivotInfo(object):
         return info
 
     def dump(self):
-        if self.pivot_type in ('jop', 'jop_indirect'):
+        if self.pivot_type in ('jop', 'jop_indirect', 'jop_push'):
             n_steps = len(self.jop_chain)
-            label = "jop" if self.pivot_type == 'jop' else "jop_indirect"
+            if self.pivot_type == 'jop_push':
+                label = "jop_push (stack transfer)"
+            elif self.pivot_type == 'jop':
+                label = "jop"
+            else:
+                label = "jop_indirect"
             if n_steps > 1:
                 label += " ({}-step chain)".format(n_steps)
-            else:
-                label += " (chained)" if self.pivot_type == 'jop' else " (chained, pointer)"
+            elif self.pivot_type == 'jop':
+                label += " (chained)"
+            elif self.pivot_type == 'jop_indirect':
+                label += " (chained, pointer)"
             print("Pivot type: {}".format(label))
             for i, (g, off) in enumerate(self.jop_chain):
                 print("  Step {}: 0x{:016x} # {}".format(i + 1, g.addr, g))
@@ -140,12 +147,12 @@ class PivotInfo(object):
         obj = bytearray(obj_size)
         chain_bytes = rop_chain.payload_str()
 
-        if self.pivot_type in ('jop', 'jop_indirect'):
+        if self.pivot_type in ('jop', 'jop_indirect', 'jop_push'):
             # Place all dispatch entries in the object
             for off, addr in self.dispatch_entries:
                 struct.pack_into('<Q', obj, off, addr)
 
-            if self.pivot_type == 'jop':
+            if self.pivot_type in ('jop', 'jop_push'):
                 chain_start = self.chain_offset_computed
                 obj[chain_start:chain_start + len(chain_bytes)] = chain_bytes
                 desc_parts = []
@@ -207,7 +214,7 @@ class PivotInfo(object):
             }
 
     def __repr__(self):
-        if self.pivot_type in ('jop', 'jop_indirect'):
+        if self.pivot_type in ('jop', 'jop_indirect', 'jop_push'):
             steps_str = "->".join("0x{:x}".format(g.addr) for g, _ in self.jop_chain)
             return "PivotInfo(jop=[{}]->pivot=0x{:x}, {}, type={}, chain=0x{:x})".format(
                 steps_str, self.pivot_gadget.addr,
