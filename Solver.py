@@ -185,6 +185,7 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
         for_refind = set()
 
     # Work on a copy so partial failures don't corrupt the caller's dict
+    original_solves = dict(solves)
     solves = dict(solves)
 
     regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
@@ -414,6 +415,17 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
         for reg in tmp_solved_regs:
             if reg in solves:
                 del solves[reg]
+
+        # Check if insertion caused ordering conflicts: a later chain
+        # clobbers an earlier chain's solved_regs.  Evict the later
+        # chain and re-add its registers for re-solving with keep_regs
+        # protecting the regs that were being clobbered.
+        evicted = chains.evict_clobbered()
+        if evicted:
+            for reg in evicted:
+                if reg in original_solves:
+                    solves[reg] = original_solves[reg]
+            keep_regs = keep_regs | chains.get_solved_regs()
 
         if not solves:
             return chains
