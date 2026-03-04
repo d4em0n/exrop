@@ -27,13 +27,22 @@ def findCandidatesWriteGadgets(gadgets, avoid_char=None):
 def findForRet(gadgets, min_diff_sp=0, not_write_regs=None, avoid_char=None):
     if not_write_regs is None:
         not_write_regs = set()
+    best = None
+    best_score = (999, 999)
     for gadget in gadgets:
         if avoid_char and _has_badchar(gadget.addr, avoid_char):
             continue
         if isintersect(not_write_regs, gadget.written_regs):
             continue
-        if not gadget.is_memory_read and not gadget.is_memory_write and not gadget.is_syscall and gadget.end_type == TYPE_RETURN and gadget.diff_sp == min_diff_sp and 'push' not in gadget.insstr:
-            return gadget
+        if not gadget.is_memory_read and not gadget.is_memory_write and not gadget.is_syscall and gadget.end_type == TYPE_RETURN and gadget.diff_sp >= min_diff_sp and 'push' not in gadget.insstr:
+            # Prefer exact diff_sp match, then fewer written registers
+            score = (0 if gadget.diff_sp == min_diff_sp else 1, len(gadget.written_regs))
+            if score < best_score:
+                best = gadget
+                best_score = score
+                if score == (0, 0):
+                    break
+    return best
 
 def findPivot(gadgets, not_write_regs=None, avoid_char=None):
     if not_write_regs is None:
@@ -188,15 +197,26 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
     original_solves = dict(solves)
     solves = dict(solves)
 
-    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+    if rec_limit >= 30:
+        return []
+
     find_write_first = False
     if avoid_char:
         find_write_first = check_contain_avoid_char(solves.values(), avoid_char)
     candidates = findCandidatesGadgets(gadgets[:], set(solves.keys()), set(solves.items()), avoid_char=avoid_char, cand_write_first=find_write_first)
 
+    ctx = initialize()
+    astCtxt = ctx.getAstContext()
+    chains = RopChain()
+
+    return _solveLoop(gadgets, solves, original_solves, candidates, avoid_char, keep_regs, add_type, for_refind, rec_limit, ctx, astCtxt, chains)
+
+
+def _solveLoop(gadgets, solves, original_solves, candidates, avoid_char, keep_regs, add_type, for_refind, rec_limit, ctx, astCtxt, chains, _restarts=0):
+    regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+    reg_refind = set()
+
     # For pure reg-to-reg solves, reorder candidates by BFS hop distance
-    # so the solver tries short transfer paths first (e.g. rdx←rax←r9)
-    # instead of exploring deep dead-end branches.
     _reg_targets = {v for v in solves.values() if isinstance(v, str)}
     if _reg_targets and all(isinstance(v, str) for v in solves.values()):
         _xfer = {}
@@ -231,14 +251,6 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
             indexed = list(enumerate(candidates))
             indexed.sort(key=_hop_key)
             candidates = [g for _, g in indexed]
-
-    ctx = initialize()
-    astCtxt = ctx.getAstContext()
-    chains = RopChain()
-    reg_refind = set()
-
-    if rec_limit >= 30:
-        return []
 
     for gadget in candidates:
         tmp_solved_ordered = []
@@ -329,7 +341,9 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
                 tmp_for_refind = for_refind.copy()
                 tmp_for_refind.add((reg, val))
                 reg_refind.update(set(list(refind_dict.keys())))
-                refind_keep = keep_regs | {val} if isinstance(val, str) else keep_regs
+                refind_keep = keep_regs.copy()
+                if isinstance(val, str):
+                    refind_keep = refind_keep | {val}
                 result = solveGadgets(candidates[:], refind_dict, avoid_char, keep_regs=refind_keep, for_refind=tmp_for_refind, rec_limit=rec_limit+1)
 
             if result:
@@ -356,7 +370,11 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
                 continue
             next_gadget = None
             diff = 0
-            not_write = tmp_solved_regs | keep_regs
+            # Protect unsolved registers AND their source registers so the
+            # end_gadget doesn't clobber a target or source needed later.
+            unsolved_regs = {r for r in solves if r not in tmp_solved_regs}
+            unsolved_src_regs = {v for r, v in solves.items() if isinstance(v, str) and r not in tmp_solved_regs}
+            not_write = tmp_solved_regs | keep_regs | unsolved_regs | unsolved_src_regs
             if gadget.end_type == TYPE_JMP_REG:
                 need_sp = max(0, -gadget.diff_sp)
                 next_gadget = findForRet(candidates[:], need_sp, not_write, avoid_char=avoid_char)
@@ -390,7 +408,8 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
             if refind_dict:
                 reg_to_reg_solve.update(tmp_solved_regs)
                 reg_to_reg_solve.update(reg_refind)
-                result = solveGadgets(gadgets, refind_dict, avoid_char, add_type=type_chains, keep_regs=reg_to_reg_solve | keep_regs, rec_limit=rec_limit+1)
+                _refind_keep = reg_to_reg_solve | keep_regs
+                result = solveGadgets(gadgets, refind_dict, avoid_char, add_type=type_chains, keep_regs=_refind_keep, rec_limit=rec_limit+1)
             if not result:
                 continue
             if not isinstance(result, RopChain):
@@ -420,15 +439,47 @@ def solveGadgets(gadgets, solves, avoid_char=None, keep_regs=None, add_type=None
         # clobbers an earlier chain's solved_regs.  Evict the later
         # chain and re-add its registers for re-solving with keep_regs
         # protecting the regs that were being clobbered.
+        # Restart from scratch so fresh candidates are searched.
         evicted = chains.evict_clobbered()
-        if evicted:
+        if evicted and _restarts < 5:
             for reg in evicted:
                 if reg in original_solves:
                     solves[reg] = original_solves[reg]
             keep_regs = keep_regs | chains.get_solved_regs()
+            find_write_first = False
+            if avoid_char:
+                find_write_first = check_contain_avoid_char(solves.values(), avoid_char)
+            candidates = findCandidatesGadgets(gadgets[:], set(solves.keys()), set(solves.items()), avoid_char=avoid_char, cand_write_first=find_write_first)
+            return _solveLoop(gadgets, solves, original_solves, candidates, avoid_char, keep_regs, add_type, for_refind, rec_limit, ctx, astCtxt, chains, _restarts + 1)
 
         if not solves:
             return chains
+
+    # Partial progress but remaining regs unsolvable in this order.
+    # Restart with a different solve order: deprioritize the regs we
+    # just committed so a different reg gets solved first.
+    if solves and chains.chains and _restarts < 5:
+        defer_regs = set(original_solves) - set(solves)
+        solves = dict(original_solves)
+        chains.chains.clear()
+        find_write_first = False
+        if avoid_char:
+            find_write_first = check_contain_avoid_char(solves.values(), avoid_char)
+        candidates = findCandidatesGadgets(gadgets[:], set(solves.keys()), set(solves.items()), avoid_char=avoid_char, cand_write_first=find_write_first)
+        # Move gadgets that ONLY solve deferred regs to the end
+        head, tail = [], []
+        for g in candidates:
+            solves_other = False
+            for r, v in solves.items():
+                if r not in defer_regs and r in g.defined_regs:
+                    solves_other = True
+                    break
+            if solves_other:
+                head.append(g)
+            else:
+                tail.append(g)
+        candidates = head + tail
+        return _solveLoop(gadgets, solves, original_solves, candidates, avoid_char, keep_regs, add_type, for_refind, rec_limit, ctx, astCtxt, chains, _restarts + 1)
 
     return []
 
