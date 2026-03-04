@@ -2,10 +2,10 @@
     "type": "pivot_reg",
     "gadgets": {
         0x4000: 'ret',
-        0x4001: 'pop rax; ret',
-        0x4002: 'mov rbx, rcx; ret',
-        0x4003: 'add rax, rbx; pop rcx; ret',
-        0x4010: 'xchg rdi, rsp; ret',
+        0x4001: 'pop rax ; ret',
+        0x4002: 'mov rbx, rcx ; ret',
+        0x4003: 'add rax, rbx ; pop rcx ; ret',
+        0x4010: 'xchg rdi, rsp ; ret',
     },
     "find": "rdi",
     "expect": {

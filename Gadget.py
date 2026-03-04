@@ -328,7 +328,7 @@ class Gadget(object):
                     max_stack_idx = idx
         stack_map = {}
         for i in range(max_stack_idx + 1):
-            addr = sp + i * 8
+            addr = (sp + i * 8) & 0xFFFFFFFFFFFFFFFF
             mem_ast = ctx.getMemoryAst(MemoryAccess(addr, CPUSIZE.QWORD))
             stack_map[i] = str(astCtxt.unroll(mem_ast))
 
@@ -601,7 +601,7 @@ class Gadget(object):
             if _suffix_dict is not None and insn_idx < len(insstr_parts):
                 remaining = ' ; '.join(insstr_parts[insn_idx:])
                 suffix = _suffix_dict.get(remaining)
-                if suffix is not None and suffix.is_analyzed:
+                if suffix is not None and suffix.is_analyzed and suffix.diff_sp >= 0:
                     if suffix.end_type == TYPE_UNKNOWN:
                         self.end_type = TYPE_UNKNOWN
                         self.is_analyzed = True
