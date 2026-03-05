@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exrop"
+version = "1.0.0"
+description = "Automatic x86-64 ROP chain generator using Triton"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.6"
+dependencies = [
+    "pyelftools",
+    "ROPGadget",
+    "triton-library",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "keystone-engine"]
+
+[project.urls]
+Homepage = "https://github.com/d4em0n/exrop"
+
+[project.scripts]
+exkrop = "exkrop.main:main"
+
+[tool.setuptools]
+py-modules = ["Exrop", "ChainBuilder", "Gadget", "Solver", "RopChain", "ThunkRewriter"]
+packages = ["exkrop"]
