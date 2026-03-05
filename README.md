@@ -1,58 +1,87 @@
 # Exrop
-Exrop is automatic ROP chains generator tool which can build gadget chain automatically from given binary and constraints
 
-Requirements : [Triton](https://github.com/JonathanSalwan/Triton), [ROPGadget](https://github.com/JonathanSalwan/ROPgadget)
+Automatic ROP chain generator for x86-64 binaries, powered by [Triton](https://github.com/JonathanSalwan/Triton) symbolic execution.
 
-Only support for x86-64 for now!
+## Features
 
-Features:
-- handling non-return gadgets (jmp reg, call reg)
-- set registers (`rdi=0xxxxxx, rsi=0xxxxxx`)
-- set register to register (`rdi=rax`)
-- write to mem (constant and register-based addresses/values)
-- write string/bytes to mem
-- function call (`open('/etc/passwd',0)`)
-- pass register in function call (`read('rax', bss, 0x100)`)
-- avoiding badchars
-- stack pivoting (`Exrop.stack_pivot`)
-- kernel-style register pivoting with JOP chain search (`Exrop.stack_pivot_reg`)
-- syscall (`Exrop.syscall`)
-- kernel mode with automatic retpoline thunk rewriting (`kernel_mode=True`)
-- clean-only mode to filter out gadgets with dangerous side-effect memory writes
-- suffix-based early exit: composes multi-instruction gadgets from already-analyzed suffixes, skipping redundant Triton execution
-- multiprocessing gadget analysis with rounds-by-length strategy and progress bar
-- gadget caching (pickle) for fast re-use
-- see [examples](examples)
+- Set registers to constants or other registers (`rdi=0x41414141`, `rdi=rax`)
+- Write to memory (constant and register-based addresses/values)
+- Write strings/bytes to memory
+- Function calls with mixed constant/register/string arguments (`open("/etc/passwd", 0)`)
+- Syscall chains
+- Badchar avoidance
+- Non-return gadget support (jmp reg, call reg)
+- Stack pivoting with JOP chain search for kernel exploits
+- Kernel mode with automatic retpoline thunk rewriting
+- Clean-only mode to filter gadgets with dangerous side-effect memory writes
+- Suffix-based composition: multi-instruction gadgets built from already-analyzed suffixes
+- Multiprocessing gadget analysis with progress bar
+- Gadget caching (pickle) for fast re-use
 
-# Installation
+## Installation
+
+### pip (recommended)
+
+```bash
+pip install git+https://github.com/d4em0n/exrop.git
+```
+
+This installs exrop and its Python dependencies (`pyelftools`, `ROPGadget`, `triton-library`).
+
+> **Note:** The `triton-library` pip package may not work on all platforms. If installation fails, [build Triton from source](https://triton-library.github.io/documentation/doxygen/index.html#linux_install_sec) and install exrop without the Triton dependency:
+> ```bash
+> pip install --no-deps git+https://github.com/d4em0n/exrop.git
+> pip install pyelftools ROPGadget
+> ```
+
+For development (editable install with test dependencies):
+
+```bash
+git clone https://github.com/d4em0n/exrop.git
+cd exrop
+pip install -e ".[dev]"
+```
+
+### Manual
+
 1. Install Python 3.6+
 2. Install [Triton](https://triton-library.github.io/documentation/doxygen/index.html#linux_install_sec)
-3. Install [ROPgadget](https://github.com/JonathanSalwan/ROPgadget)
-4. Optional: Install [Keystone](https://www.keystone-engine.org/) (only needed for running tests)
-5. Add exrop to your Python path: `export PYTHONPATH=/path/to/exrop:$PYTHONPATH`
+3. Install [ROPGadget](https://github.com/JonathanSalwan/ROPgadget)
+4. Optional: install [Keystone](https://www.keystone-engine.org/) (only needed for tests)
+5. Clone this repo and add it to your Python path:
+   ```bash
+   git clone https://github.com/d4em0n/exrop.git
+   export PYTHONPATH=/path/to/exrop:$PYTHONPATH
+   ```
 
-# demo
-``` python
+## Quick Start
+
+```python
 from Exrop import Exrop
 
 rop = Exrop("/bin/ls")
 rop.find_gadgets(cache=True)
-print("write-regs gadgets: rdi=0x41414141, rsi:0x42424242, rdx: 0x43434343, rax:0x44444444, rbx=0x45454545")
-chain = rop.set_regs({'rdi':0x41414141, 'rsi': 0x42424242, 'rdx':0x43434343, 'rax':0x44444444, 'rbx': 0x45454545})
+
+# Set registers
+chain = rop.set_regs({'rdi': 0x41414141, 'rsi': 0x42424242, 'rdx': 0x43434343})
 chain.dump()
-print("write-what-where gadgets: [0x41414141]=0xdeadbeefff, [0x43434343]=0x110011")
+
+# Write to memory
 chain = rop.set_writes({0x41414141: 0xdeadbeefff, 0x43434343: 0x00110011})
 chain.dump()
-print("write-string gadgets 0x41414141=\"Hello world!\\n\"")
+
+# Write string to memory
 chain = rop.set_string({0x41414141: "Hello world!\n"})
 chain.dump()
-print("func-call gadgets 0x41414141(0x20, 0x30, \"Hello\")")
+
+# Function call
 chain = rop.func_call(0x41414141, (0x20, 0x30, "Hello"), 0x7fffff00)
 chain.dump()
 ```
+
 Output:
+
 ```
-write-regs gadget: rdi=0x41414141, rsi:0x42424242, rdx: 0x43434343, rax:0x44444444, rbx=0x45454545
 $RSP+0x0000 : 0x00000000000060d0 # pop rbx; ret
 $RSP+0x0008 : 0x0000000044444444
 $RSP+0x0010 : 0x0000000000014852 # mov rax, rbx; pop rbx; ret
@@ -65,67 +94,18 @@ $RSP+0x0040 : 0x0000000000003a62 # pop rdx; ret
 $RSP+0x0048 : 0x0000000043434343
 $RSP+0x0050 : 0x00000000000060d0 # pop rbx; ret
 $RSP+0x0058 : 0x0000000045454545
-
-write-what-where gadgets: [0x41414141]=0xdeadbeefff, [0x43434343]=0x110011
-$RSP+0x0000 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0008 : 0x000000deadbeefff
-$RSP+0x0010 : 0x000000000000d91f # mov rax, rdi; ret
-$RSP+0x0018 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0020 : 0x0000000041414139
-$RSP+0x0028 : 0x000000000000e0fb # mov qword ptr [rdi + 8], rax; ret
-$RSP+0x0030 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0038 : 0x0000000000110011
-$RSP+0x0040 : 0x000000000000d91f # mov rax, rdi; ret
-$RSP+0x0048 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0050 : 0x000000004343433b
-$RSP+0x0058 : 0x000000000000e0fb # mov qword ptr [rdi + 8], rax; ret
-
-write-string gadgets 0x41414141="Hello world!\n"
-$RSP+0x0000 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0008 : 0x6f77206f6c6c6548
-$RSP+0x0010 : 0x000000000000d91f # mov rax, rdi; ret
-$RSP+0x0018 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0020 : 0x0000000041414139
-$RSP+0x0028 : 0x000000000000e0fb # mov qword ptr [rdi + 8], rax; ret
-$RSP+0x0030 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0038 : 0x0000000a21646c72
-$RSP+0x0040 : 0x000000000000d91f # mov rax, rdi; ret
-$RSP+0x0048 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0050 : 0x0000000041414141
-$RSP+0x0058 : 0x000000000000e0fb # mov qword ptr [rdi + 8], rax; ret
-
-func-call gadgets 0x41414141(0x20, 0x30, "Hello")
-$RSP+0x0000 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0008 : 0x0000006f6c6c6548
-$RSP+0x0010 : 0x000000000000d91f # mov rax, rdi; ret
-$RSP+0x0018 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0020 : 0x000000007ffffef8
-$RSP+0x0028 : 0x000000000000e0fb # mov qword ptr [rdi + 8], rax; ret
-$RSP+0x0030 : 0x0000000000004ce5 # pop rdi; ret
-$RSP+0x0038 : 0x0000000000000020
-$RSP+0x0040 : 0x000000000000629c # pop rsi; ret
-$RSP+0x0048 : 0x0000000000000030
-$RSP+0x0050 : 0x0000000000003a62 # pop rdx; ret
-$RSP+0x0058 : 0x000000007fffff00
-$RSP+0x0060 : 0x0000000041414141
-
-python3 tests.py  1,48s user 0,05s system 97% cpu 1,566 total
-
 ```
-## Kernel mode
 
-For Linux kernels with retpoline mitigations, `kernel_mode=True` automatically detects
-thunk symbols, rewrites gadgets, and restricts to the `.text` section:
+## Kernel Mode
 
-``` python
+For Linux kernels with retpoline mitigations, `kernel_mode=True` automatically detects thunk symbols, rewrites gadgets, and restricts to the `.text` section:
+
+```python
 from Exrop import Exrop
 
 rop = Exrop("/path/to/vmlinux")
 rop.find_gadgets(cache=True, kernel_mode=True)
-
-# Use clean_only to exclude gadgets with dangerous side-effect memory writes
-# (e.g., add byte ptr [rcx + 0x415d5be8], cl — crashes on unmapped memory)
-rop.clean_only = True
+rop.clean_only = True  # exclude gadgets with dangerous side-effect writes
 
 # Set registers
 chain = rop.set_regs({'rdi': 0x41414141, 'rsi': 0})
@@ -140,93 +120,40 @@ for p in pivots[:5]:
 payload = pivots[0].build_payload(chain)
 ```
 
-## Userspace examples
+## exkrop CLI
 
-Another example: open-read-write gadgets!
+The `exkrop` command provides an interactive workflow for kernel ROP chain generation with pivot selection and C code output:
 
-``` python
+```bash
+exkrop <vmlinux>
+# or: python3 -m exkrop <vmlinux>
+```
+
+Features: exploit templates (privesc, core_pattern overwrite), KASLR-relative output, pivot gadget browser, reserved offset handling, and C code generation. See [exkrop/README.md](exkrop/README.md) for details.
+
+## Userspace Example: open-read-write
+
+```python
 from pwn import *
-import time
 from Exrop import Exrop
 
-binname = "/lib/x86_64-linux-gnu/libc.so.6"
-libc = ELF(binname, checksec=False)
-open = libc.symbols['open']
-read = libc.symbols['read']
-write = libc.symbols['write']
+libc = ELF("/lib/x86_64-linux-gnu/libc.so.6", checksec=False)
+rop = Exrop(libc.path)
+rop.find_gadgets(cache=True)
+
 bss = libc.bss()
 
-t = time.mktime(time.gmtime())
-rop = Exrop(binname)
-rop.find_gadgets(cache=True)
-print("open('/etc/passwd', 0)")
-chain = rop.func_call(open, ("/etc/passwd", 0), bss)
+chain = rop.func_call(libc.symbols['open'], ("/etc/passwd", 0), bss)
 chain.set_base_addr(0x00007ffff79e4000)
 chain.dump()
-print("read('rax', bss, 0x100)") # register can be used as argument too!
-chain = rop.func_call(read, ('rax', bss, 0x100))
+
+chain = rop.func_call(libc.symbols['read'], ('rax', bss, 0x100))
 chain.set_base_addr(0x00007ffff79e4000)
 chain.dump()
-print("write(1, bss, 0x100)")
-chain = rop.func_call(write, (1, bss, 0x100))
+
+chain = rop.func_call(libc.symbols['write'], (1, bss, 0x100))
 chain.set_base_addr(0x00007ffff79e4000)
 chain.dump()
-print("done in {}s".format(time.mktime(time.gmtime()) - t))
 ```
 
-Output:
-```
-open('/etc/passwd', 0)
-$RSP+0x0000 : 0x00007ffff7a05a45 # pop r13 ; ret
-$RSP+0x0008 : 0x00000000003ec860
-$RSP+0x0010 : 0x00007ffff7a7630c # xor edi, edi ; pop rbx ; mov rax, rdi ; pop rbp ; pop r12 ; ret
-$RSP+0x0018 : 0x00007ffff7a0555f
-$RSP+0x0020 : 0x0000000000000000
-$RSP+0x0028 : 0x0000000000000000
-$RSP+0x0030 : 0x00007ffff7a06b8a # mov r9, r13 ; call rbx: next -> (0x0002155f) # pop rdi ; ret
-$RSP+0x0038 : 0x00007ffff7a0555f # pop rdi ; ret
-$RSP+0x0040 : 0x7361702f6374652f
-$RSP+0x0048 : 0x00007ffff7b251c7 # mov qword ptr [r9], rdi ; ret
-$RSP+0x0050 : 0x00007ffff7a05a45 # pop r13 ; ret
-$RSP+0x0058 : 0x00000000003ec868
-$RSP+0x0060 : 0x00007ffff7a7630c # xor edi, edi ; pop rbx ; mov rax, rdi ; pop rbp ; pop r12 ; ret
-$RSP+0x0068 : 0x00007ffff7a0555f
-$RSP+0x0070 : 0x0000000000000000
-$RSP+0x0078 : 0x0000000000000000
-$RSP+0x0080 : 0x00007ffff7a06b8a # mov r9, r13 ; call rbx: next -> (0x0002155f) # pop rdi ; ret
-$RSP+0x0088 : 0x00007ffff7a0555f # pop rdi ; ret
-$RSP+0x0090 : 0x0000000000647773
-$RSP+0x0098 : 0x00007ffff7b251c7 # mov qword ptr [r9], rdi ; ret
-$RSP+0x00a0 : 0x00007ffff7a62c70 # xor esi, esi ; mov rax, rsi ; ret
-$RSP+0x00a8 : 0x00007ffff7a0555f # pop rdi ; ret
-$RSP+0x00b0 : 0x00000000003ec860
-$RSP+0x00b8 : 0x000000000010fc40
-
-read('rax', bss, 0x100)
-$RSP+0x0000 : 0x00007ffff7a71362 # mov dh, 0xc5 ; pop rbx ; pop rbp ; pop r12 ; ret
-$RSP+0x0008 : 0x0000000000000000
-$RSP+0x0010 : 0x0000000000000000
-$RSP+0x0018 : 0x00007ffff7a0555f
-$RSP+0x0020 : 0x00007ffff7aea899 # mov r8, rax ; call r12: next -> (0x0002155f) # pop rdi ; ret
-$RSP+0x0028 : 0x00007ffff7b4a3b1 # pop rax ; pop rdx ; pop rbx ; ret
-$RSP+0x0030 : 0x00007ffff79e5b96
-$RSP+0x0038 : 0x0000000000000000
-$RSP+0x0040 : 0x0000000000000000
-$RSP+0x0048 : 0x00007ffff7a7fa08 # mov rdi, r8 ; call rax: next -> (0x00001b96) # pop rdx ; ret
-$RSP+0x0050 : 0x00007ffff79e5b96 # pop rdx ; ret
-$RSP+0x0058 : 0x0000000000000100
-$RSP+0x0060 : 0x00007ffff7a07e6a # pop rsi ; ret
-$RSP+0x0068 : 0x00000000003ec860
-$RSP+0x0070 : 0x0000000000110070
-
-write(1, bss, 0x100)
-$RSP+0x0000 : 0x00007ffff7a0555f # pop rdi ; ret
-$RSP+0x0008 : 0x0000000000000001
-$RSP+0x0010 : 0x00007ffff79e5b96 # pop rdx ; ret
-$RSP+0x0018 : 0x0000000000000100
-$RSP+0x0020 : 0x00007ffff7a07e6a # pop rsi ; ret
-$RSP+0x0028 : 0x00000000003ec860
-$RSP+0x0030 : 0x0000000000110140
-
-done in 3.0s (Running on: A9-9420 RADEON R5 2C+3G (2) @ 3.000GHz (using cached))
-```
+More examples in the [examples/](examples) directory.

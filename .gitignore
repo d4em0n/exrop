@@ -5,3 +5,6 @@ __pycache__/
 *.swo
 *.exrop_cache
 tmp/
+*.egg-info/
+dist/
+build/
