@@ -552,11 +552,17 @@ def _try_write_gadgets(gadgets, candidates_list, solves, regs, ctx, chains, fwd_
             refind_dict = {**refind_dict_addr, **refind_dict_val}
             result = True
             if refind_dict:
-                # Protect register operands from being clobbered by the refind solve
+                # Protect register operands from being clobbered by the
+                # refind solve — but only when the write gadget reads
+                # them directly.  When a side is forwarded (e.g. rbx →
+                # rdx), the forwarding gadget captures the value before
+                # any clobber (guaranteed by defined_regs), and the
+                # write gadget uses the forwarded register, so the
+                # original source register doesn't need protection.
                 keep = set()
-                if isinstance(addr, str) and addr in regs:
+                if isinstance(addr, str) and addr in regs and not addr_fwd:
                     keep.add(addr)
-                if isinstance(val, str) and val in regs:
+                if isinstance(val, str) and val in regs and not val_fwd:
                     keep.add(val)
                 result = solveGadgets(gadgets[:], refind_dict, avoid_char=avoid_char, keep_regs=keep)
             if result:
