@@ -1,0 +1,10 @@
+{
+    "type": "write_mem",
+    "gadgets": {
+        0xa55ef: 'mov rdx, rbx; pop rbx; pop rbp; ret',
+        0x90e93: 'mov qword ptr [rcx], rdx; ret',
+    },
+    "find": {
+        "rcx": "rbx",
+    }
+}
