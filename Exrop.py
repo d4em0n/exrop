@@ -2,8 +2,8 @@ from ChainBuilder import ChainBuilder
 from RopChain import RopChain
 from Gadget import TYPE_RETURN
 
-DEFAULT_FILTER = 'push|lea|pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|nop|leave'
-KERNEL_FILTER = 'push|pop|xchg|add|sub|xor|or|and|mov|lea|ret|jmp|call|nop|leave'
+DEFAULT_FILTER = 'push|lea|pop|xchg|add|sub|xor|mov|ret|jmp|call|syscall|nop|cdqe|cwde|leave'
+KERNEL_FILTER = 'push|pop|xchg|add|sub|xor|or|and|mov|lea|ret|jmp|call|nop|cdqe|cwde|leave'
 
 def parseRopGadget(filename, opt="", depth=None, only_filter=None):
     from subprocess import Popen, PIPE, STDOUT
